@@ -1,0 +1,13 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+test_results
+dist
+build
+data/output
+*.zip
+.DS_Store

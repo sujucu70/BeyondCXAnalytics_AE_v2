@@ -1,0 +1,55 @@
+{
+  "dimensions": {
+    "volumetry": {
+      "class": "beyond_metrics.VolumetriaMetrics",
+      "enabled": true,
+      "metrics": [
+        "volume_by_channel",
+        "volume_by_skill",
+        "channel_distribution_pct",
+        "skill_distribution_pct",
+        "heatmap_24x7",
+        "monthly_seasonality_cv",
+        "peak_offpeak_ratio",
+        "concentration_top20_skills_pct"
+      ]
+    },
+    "operational_performance": {
+      "class": "beyond_metrics.dimensions.OperationalPerformance.OperationalPerformanceMetrics",
+      "enabled": true,
+      "metrics": [
+        "aht_distribution",
+        "talk_hold_acw_p50_by_skill",
+        "fcr_rate",
+        "escalation_rate",
+        "abandonment_rate",
+        "recurrence_rate_7d",
+        "repeat_channel_rate",
+        "occupancy_rate",
+        "performance_score"
+      ]
+    },
+    "customer_satisfaction": {
+      "class": "beyond_metrics.dimensions.SatisfactionExperience.SatisfactionExperienceMetrics",
+      "enabled": true,
+      "metrics": [
+        "csat_avg_by_skill_channel",
+        "nps_avg_by_skill_channel",
+        "ces_avg_by_skill_channel",
+        "csat_aht_correlation",
+        "csat_aht_skill_summary"
+      ]
+    },
+    "economy_costs": {
+      "class": "beyond_metrics.dimensions.EconomyCost.EconomyCostMetrics",
+      "enabled": true,
+      "metrics": [
+        "cpi_by_skill_channel",
+        "annual_cost_by_skill_channel",
+        "cost_breakdown",
+        "inefficiency_cost_by_skill_channel",
+        "potential_savings"
+      ]
+    }
+  }
+}

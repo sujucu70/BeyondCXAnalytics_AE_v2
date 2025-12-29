@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Si algún día subes la imagen a un registry, podrías usar:
+    # image: ghcr.io/TU_USUARIO/beyondcx-heatmap-api:latest
+
+    container_name: beyondcx-api
+    restart: unless-stopped
+
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+    environment:
+      BASIC_AUTH_USERNAME: "${BASIC_AUTH_USERNAME:-admin}"
+      BASIC_AUTH_PASSWORD: "${BASIC_AUTH_PASSWORD:-admin}"
+
+    volumes:
+      - "${DATA_DIR:-./data}:/app/data"
+
+    networks:
+      - beyondcx-net
+
+  nginx:
+    image: nginx:stable
+    container_name: beyondcx-nginx
+    restart: unless-stopped
+
+    depends_on:
+      - api
+
+    ports:
+      - "80:80"
+
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+
+    networks:
+      - beyondcx-net
+
+networks:
+  beyondcx-net:
+    driver: bridge

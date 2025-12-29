@@ -1,0 +1,27 @@
+{
+  "dimensions": {
+    "volumetry": {
+      "class": "beyond_metrics.VolumetriaMetrics",
+      "enabled": true,
+      "metrics": [
+        "volume_by_channel",
+        "volume_by_skill"
+      ]
+    },
+    "operational_performance": {
+      "class": "beyond_metrics.dimensions.OperationalPerformance.OperationalPerformanceMetrics",
+      "enabled": false,
+      "metrics": []
+    },
+    "customer_satisfaction": {
+      "class": "beyond_metrics.dimensions.SatisfactionExperience.SatisfactionExperienceMetrics",
+      "enabled": false,
+      "metrics": []
+    },
+    "economy_costs": {
+      "class": "beyond_metrics.dimensions.EconomyCost.EconomyCostMetrics",
+      "enabled": false,
+      "metrics": []
+    }
+  }
+}

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beyond-metrics"
+version = "0.1.0"
+description = "Librería de métricas de volumetría para contact centers"
+authors = [{ name = "Nacho" }]
+requires-python = ">=3.9"
+dependencies = [
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "openai",
+    "reportlab",
+    "google-api-python-client>=2.153.0",
+    "google-auth>=2.35.0",
+    "google-auth-oauthlib>=1.2.1",
+    # --- API REST ---
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",  # necesario para subir ficheros
+    "boto3",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["beyond_metrics", "beyond_flows", "beyond_api"]
+
+

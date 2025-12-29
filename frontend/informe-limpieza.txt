@@ -1,0 +1,38 @@
+================================================================================
+GENESYS DATA CLEANING REPORT
+================================================================================
+
+Generated: 2025-12-02 12:23:56
+
+DATA QUALITY METRICS
+--------------------------------------------------------------------------------
+Records before cleaning:    1245
+Records after cleaning:     1245
+Duplicate records removed:  0
+Record reduction:           0.00%
+
+SKILL CONSOLIDATION
+--------------------------------------------------------------------------------
+Unique skills before:       41
+Unique skills after:        40
+Skills grouped:             1
+Consolidation rate:         2.44%
+
+CLEANING OPERATIONS
+--------------------------------------------------------------------------------
+[OK] Text normalization:       4 columns normalized
+[OK] Typo correction:          Applied to all text fields
+[OK] Duplicate removal:        0 rows removed
+[OK] Skill grouping:           41 original skills consolidated
+
+SKILL MAPPING (Top 20)
+--------------------------------------------------------------------------------
+
+FILE OUTPUT SUMMARY
+--------------------------------------------------------------------------------
+[OK] datos-limpios.xlsx:       1245 cleaned records
+[OK] skills-mapping.xlsx:      Skill consolidation mapping
+[OK] informe-limpieza.txt:     This report
+
+END OF REPORT
+================================================================================

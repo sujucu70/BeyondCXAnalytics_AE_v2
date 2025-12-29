@@ -1,0 +1,5 @@
+{
+  "name": "Beyond Diagnostic Prototipo",
+  "description": "An interactive tool for clients to understand the data requirements for different tiers of contact center analysis. Users can select an analysis tier (Gold, Silver, Bronze) to view detailed data specifications, including required fields, formats, and minimum data volumes, and can download a corresponding data template.",
+  "requestFramePermissions": []
+}

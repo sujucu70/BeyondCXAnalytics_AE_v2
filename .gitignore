@@ -1,0 +1,36 @@
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Vite / build
+dist/
+*.local
+*.log
+
+# Python / backend
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/.mypy_cache/
+backend/.pytest_cache/
+backend/.DS_Store
+
+# General
+.DS_Store
+.env
+.env.*
+.vscode/
+.idea/
+*.sqlite3
+
+# Coverage / tests
+coverage/
+htmlcov/
+*.coverage
+*.pytest_cache/
