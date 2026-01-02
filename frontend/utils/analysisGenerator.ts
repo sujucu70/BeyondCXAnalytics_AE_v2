@@ -5,7 +5,11 @@ import { RoadmapPhase } from '../types';
 import { BarChartHorizontal, Zap, Smile, DollarSign, Target, Globe } from 'lucide-react';
 import { calculateAgenticReadinessScore, type AgenticReadinessInput } from './agenticReadinessV2';
 import { callAnalysisApiRaw } from './apiClient';
-import { mapBackendResultsToAnalysisData } from './backendMapper';
+import {
+  mapBackendResultsToAnalysisData,
+  buildHeatmapFromBackend,
+} from './backendMapper';
+
 
 
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
@@ -568,8 +572,18 @@ export const generateAnalysis = async (
       mapped.recommendations = generateRecommendationsFromTemplates();
       mapped.opportunities = generateOpportunityMatrixData();
       mapped.roadmap = generateRoadmapData();
-      mapped.benchmarkData = generateBenchmarkData();
-      mapped.heatmapData = generateHeatmapData(costPerHour, avgCsat, segmentMapping);
+
+      // Benchmark: de momento no tenemos datos reales -> no lo generamos en modo backend
+      mapped.benchmarkData = [];
+
+      // Heatmap: ahora se construye a partir de datos reales del backend
+      mapped.heatmapData = buildHeatmapFromBackend(
+        raw,
+        costPerHour,
+        avgCsat,
+        segmentMapping
+      );
+
 
       console.log('✅ Usando resultados del backend mapeados + findings/benchmark del frontend');
       return mapped;
@@ -734,6 +748,7 @@ const generateSyntheticAnalysis = (
     economicModel: generateEconomicModelData(),
     roadmap: generateRoadmapData(),
     benchmarkData: generateBenchmarkData(),
+    source: 'synthetic', 
   };
 };
 

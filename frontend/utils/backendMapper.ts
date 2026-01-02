@@ -10,6 +10,8 @@ import type {
 } from '../types';
 import type { BackendRawResults } from './apiClient';
 import { BarChartHorizontal, Zap, DollarSign } from 'lucide-react';
+import type { HeatmapDataPoint, CustomerSegment } from '../types';
+
 
 function safeNumber(value: any, fallback = 0): number {
   const n = typeof value === 'number' ? value : Number(value);
@@ -577,16 +579,66 @@ export function mapBackendResultsToAnalysisData(
   if (performanceDimension) dimensions.push(performanceDimension);
   if (economyDimension) dimensions.push(economyDimension);
 
-  // KPIs de resumen
+  const op = raw?.operational_performance;
+  const cs = raw?.customer_satisfaction;
+
+  // FCR: viene ya como porcentaje 0-100
+  const fcrPctRaw = safeNumber(op?.fcr_rate, NaN);
+  const fcrPct =
+    Number.isFinite(fcrPctRaw) && fcrPctRaw >= 0
+      ? Math.min(100, Math.max(0, fcrPctRaw))
+      : undefined;
+
+  const csatAvg = computeCsatAverage(cs);
+
+  // CSAT global (opcional)
+  const csatGlobalRaw = safeNumber(cs?.csat_global, NaN);
+  const csatGlobal =
+    Number.isFinite(csatGlobalRaw) && csatGlobalRaw > 0
+      ? csatGlobalRaw
+      : undefined;
+
+
+    // KPIs de resumen (los 4 primeros son los que se ven en "Métricas de Contacto")
   const summaryKpis: Kpi[] = [];
 
+  // 1) Interacciones Totales (volumen backend)
   summaryKpis.push({
-    label: 'Volumen total (estimado)',
+    label: 'Interacciones Totales',
     value:
       totalVolume > 0
         ? totalVolume.toLocaleString('es-ES')
-        : 'N/A',
+        : 'N/D',
   });
+
+  // 2) AHT Promedio (P50 de distribución de AHT)
+  const ahtP50 = safeNumber(op?.aht_distribution?.p50, 0);
+  summaryKpis.push({
+    label: 'AHT Promedio',
+    value: ahtP50
+      ? `${Math.round(ahtP50)}s`
+      : 'N/D',
+  });
+
+  // 3) Tasa FCR
+  summaryKpis.push({
+    label: 'Tasa FCR',
+    value:
+      fcrPct !== undefined
+        ? `${Math.round(fcrPct)}%`
+        : 'N/D',
+  });
+
+  // 4) CSAT
+  summaryKpis.push({
+    label: 'CSAT',
+    value:
+      csatGlobal !== undefined
+        ? `${csatGlobal.toFixed(1)}/5`
+        : 'N/D',
+  });
+
+  // --- KPIs adicionales, usados en otras secciones ---
 
   if (numChannels > 0) {
     summaryKpis.push({
@@ -607,7 +659,7 @@ export function mapBackendResultsToAnalysisData(
     value: `${arScore.toFixed(1)}/10`,
   });
 
-  // KPIs de economía
+  // KPIs de economía (backend)
   const econ = raw?.economy_costs;
   const totalAnnual = safeNumber(
     econ?.cost_breakdown?.total_annual,
@@ -649,5 +701,277 @@ export function mapBackendResultsToAnalysisData(
     benchmarkData: [],
     agenticReadiness,
     staticConfig: undefined,
+    source: 'backend',
   };
+}
+
+export function buildHeatmapFromBackend(
+  raw: BackendRawResults,
+  costPerHour: number,
+  avgCsat: number,
+  segmentMapping?: {
+    high_value_queues: string[];
+    medium_value_queues: string[];
+    low_value_queues: string[];
+  }
+): HeatmapDataPoint[] {
+  const volumetry = raw?.volumetry;
+  const volumeBySkill = volumetry?.volume_by_skill;
+
+  const rawSkillLabels =
+    volumeBySkill?.labels ??
+    volumeBySkill?.skills ??
+    volumeBySkill?.skill_names ??
+    [];
+
+  const skillLabels: string[] = Array.isArray(rawSkillLabels)
+    ? rawSkillLabels.map((s: any) => String(s))
+    : [];
+
+  const skillVolumes: number[] = Array.isArray(volumeBySkill?.values)
+    ? volumeBySkill.values.map((v: any) => safeNumber(v, 0))
+    : [];
+
+  const op = raw?.operational_performance;
+  const econ = raw?.economy_costs;
+  const cs = raw?.customer_satisfaction;
+
+  const talkHoldAcwBySkill = Array.isArray(
+    op?.talk_hold_acw_p50_by_skill
+  )
+    ? op.talk_hold_acw_p50_by_skill
+    : [];
+
+  const globalEscalation = safeNumber(op?.escalation_rate, 0);
+  const globalFcrPct = Math.max(
+    0,
+    Math.min(100, 100 - globalEscalation)
+  );
+
+  const csatGlobalRaw = safeNumber(cs?.csat_global, NaN);
+  const csatGlobal =
+    Number.isFinite(csatGlobalRaw) && csatGlobalRaw > 0
+      ? csatGlobalRaw
+      : undefined;
+  const csatMetric0_100 = csatGlobal
+    ? Math.max(
+        0,
+        Math.min(100, Math.round((csatGlobal / 5) * 100))
+      )
+    : 0;
+
+  const ineffBySkill = Array.isArray(
+    econ?.inefficiency_cost_by_skill_channel
+  )
+    ? econ.inefficiency_cost_by_skill_channel
+    : [];
+
+  const COST_PER_SECOND = costPerHour / 3600;
+
+  if (!skillLabels.length) return [];
+
+  // Para normalizar la repetitividad según volumen
+  const volumesForNorm = skillVolumes.filter((v) => v > 0);
+  const minVol =
+    volumesForNorm.length > 0
+      ? Math.min(...volumesForNorm)
+      : 0;
+  const maxVol =
+    volumesForNorm.length > 0
+      ? Math.max(...volumesForNorm)
+      : 0;
+
+  const heatmap: HeatmapDataPoint[] = [];
+
+  for (let i = 0; i < skillLabels.length; i++) {
+    const skill = skillLabels[i];
+    const volume = safeNumber(skillVolumes[i], 0);
+
+    const talkHold = talkHoldAcwBySkill[i] || {};
+    const talk_p50 = safeNumber(talkHold.talk_p50, 0);
+    const hold_p50 = safeNumber(talkHold.hold_p50, 0);
+    const acw_p50 = safeNumber(talkHold.acw_p50, 0);
+
+    const aht_mean = talk_p50 + hold_p50 + acw_p50;
+
+    // Coste anual aproximado
+    const annual_volume = volume * 12;
+    const annual_cost = Math.round(
+      annual_volume * aht_mean * COST_PER_SECOND
+    );
+
+    const ineff = ineffBySkill[i] || {};
+    const aht_p50_backend = safeNumber(ineff.aht_p50, aht_mean);
+    const aht_p90_backend = safeNumber(ineff.aht_p90, aht_mean);
+
+    // Variabilidad proxy: aproximamos CV a partir de P90-P50
+    let cv_aht = 0;
+    if (aht_p50_backend > 0) {
+      cv_aht =
+        (aht_p90_backend - aht_p50_backend) / aht_p50_backend;
+    }
+
+    // Dimensiones agentic similares a las que tenías en generateHeatmapData,
+    // pero usando valores reales en lugar de aleatorios.
+
+    // 1) Predictibilidad (menor CV => mayor puntuación)
+    const predictability_score = Math.max(
+      0,
+      Math.min(
+        10,
+        10 - ((cv_aht - 0.3) / 1.2) * 10
+      )
+    );
+
+    // 2) Complejidad inversa (usamos la tasa global de escalación como proxy)
+    const transfer_rate = globalEscalation; // %
+    const complexity_inverse_score = Math.max(
+      0,
+      Math.min(
+        10,
+        10 - ((transfer_rate / 100 - 0.05) / 0.25) * 10
+      )
+    );
+
+    // 3) Repetitividad (según volumen relativo)
+    let repetitivity_score = 5;
+    if (maxVol > minVol && volume > 0) {
+      repetitivity_score =
+        ((volume - minVol) / (maxVol - minVol)) * 10;
+    } else if (volume === 0) {
+      repetitivity_score = 0;
+    }
+
+    const agentic_readiness_score =
+      predictability_score * 0.4 +
+      complexity_inverse_score * 0.35 +
+      repetitivity_score * 0.25;
+
+    let readiness_category:
+      | 'automate_now'
+      | 'assist_copilot'
+      | 'optimize_first';
+    if (agentic_readiness_score >= 8.0) {
+      readiness_category = 'automate_now';
+    } else if (agentic_readiness_score >= 5.0) {
+      readiness_category = 'assist_copilot';
+    } else {
+      readiness_category = 'optimize_first';
+    }
+
+    const automation_readiness = Math.round(
+      agentic_readiness_score * 10
+    ); // 0-100
+
+    // Métricas normalizadas 0-100 para el color del heatmap
+    const ahtMetric = aht_mean
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              100 - ((aht_mean - 240) / 310) * 100
+            )
+          )
+        )
+      : 0;
+
+    const holdMetric = hold_p50
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              100 - (hold_p50 / 120) * 100
+            )
+          )
+        )
+      : 0;
+
+    const transferMetric = Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(100 - transfer_rate)
+      )
+    );
+
+    // Clasificación por segmento (si nos pasan mapeo)
+    let segment: CustomerSegment | undefined;
+    if (segmentMapping) {
+      const normalizedSkill = skill.toLowerCase();
+      if (
+        segmentMapping.high_value_queues.some((q) =>
+          normalizedSkill.includes(q.toLowerCase())
+        )
+      ) {
+        segment = 'high';
+      } else if (
+        segmentMapping.low_value_queues.some((q) =>
+          normalizedSkill.includes(q.toLowerCase())
+        )
+      ) {
+        segment = 'low';
+      } else {
+        segment = 'medium';
+      }
+    }
+
+    heatmap.push({
+      skill,
+      segment,
+      volume,
+      aht_seconds: aht_mean,
+      metrics: {
+        fcr: Math.round(globalFcrPct),
+        aht: ahtMetric,
+        csat: csatMetric0_100,
+        hold_time: holdMetric,
+        transfer_rate: transferMetric,
+      },
+      annual_cost,
+      variability: {
+        cv_aht: Math.round(cv_aht * 100), // %
+        cv_talk_time: 0,
+        cv_hold_time: 0,
+        transfer_rate,
+      },
+      automation_readiness,
+      dimensions: {
+        predictability: Math.round(predictability_score * 10) / 10,
+        complexity_inverse:
+          Math.round(complexity_inverse_score * 10) / 10,
+        repetitivity: Math.round(repetitivity_score * 10) / 10,
+      },
+      readiness_category,
+    });
+  }
+
+  console.log('📊 Heatmap backend generado:', {
+    length: heatmap.length,
+    firstItem: heatmap[0],
+  });
+
+  return heatmap;
+}
+
+function computeCsatAverage(customerSatisfaction: any): number | undefined {
+  const arr = customerSatisfaction?.csat_avg_by_skill_channel;
+  if (!Array.isArray(arr) || !arr.length) return undefined;
+
+  const values: number[] = arr
+    .map((item: any) =>
+      safeNumber(
+        item?.csat ??
+          item?.value ??
+          item?.score,
+        NaN
+      )
+    )
+    .filter((v) => Number.isFinite(v));
+
+  if (!values.length) return undefined;
+
+  const sum = values.reduce((a, b) => a + b, 0);
+  return sum / values.length;
 }

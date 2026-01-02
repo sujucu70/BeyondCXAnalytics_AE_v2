@@ -33,6 +33,7 @@
       "class": "beyond_metrics.dimensions.SatisfactionExperience.SatisfactionExperienceMetrics",
       "enabled": true,
       "metrics": [
+        "csat_global",
         "csat_avg_by_skill_channel",
         "nps_avg_by_skill_channel",
         "ces_avg_by_skill_channel",

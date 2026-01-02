@@ -160,6 +160,26 @@ class SatisfactionExperienceMetrics:
             .round(2)
         )
         return pivot
+    
+    def csat_global(self) -> float:
+        """
+        CSAT medio global (todas las interacciones).
+
+        Usa la columna opcional `csat_score`:
+        - Si no existe, devuelve NaN.
+        - Si todos los valores son NaN / vacíos, devuelve NaN.
+        """
+        df = self.df
+        if "csat_score" not in df.columns:
+            return float("nan")
+
+        series = pd.to_numeric(df["csat_score"], errors="coerce").dropna()
+        if series.empty:
+            return float("nan")
+
+        mean = series.mean()
+        return float(round(mean, 2))
+
 
     def csat_aht_correlation(self) -> Dict[str, Any]:
         """

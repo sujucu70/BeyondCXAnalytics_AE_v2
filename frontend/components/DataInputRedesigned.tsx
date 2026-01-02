@@ -58,7 +58,8 @@ const DataInputRedesigned: React.FC<DataInputRedesignedProps> = ({
     { name: 'wrap_up_time', type: 'Segundos', example: '30', required: true },
     { name: 'agent_id', type: 'String', example: 'Agente_045', required: true },
     { name: 'transfer_flag', type: 'Boolean', example: 'TRUE / FALSE', required: true },
-    { name: 'caller_id', type: 'String (hash)', example: 'Hash_99283', required: false }
+    { name: 'caller_id', type: 'String (hash)', example: 'Hash_99283', required: false },
+    { name: 'csat_score', type: 'Float', example: '4', required: false }
   ];
   
   const handleDownloadTemplate = () => {

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
-
+import math
 
 REQUIRED_COLUMNS_OP: List[str] = [
     "interaction_id",
@@ -165,21 +165,57 @@ class OperationalPerformanceMetrics:
     # ------------------------------------------------------------------ #
     def fcr_rate(self) -> float:
         """
-        FCR = % de interacciones resueltas en el primer contacto.
+        FCR proxy = 100 - escalation_rate.
 
-        Definido como % de filas con is_resolved == True.
-        Si la columna no existe, devuelve NaN.
+        Usamos la métrica de escalación ya calculada a partir de transfer_flag.
+        Si no se puede calcular escalation_rate, intentamos derivarlo
+        directamente de la columna transfer_flag. Si todo falla, devolvemos NaN.
         """
+        try:
+            esc = self.escalation_rate()
+        except Exception:
+            esc = float("nan")
+
+        # Si escalation_rate es válido, usamos el proxy simple
+        if esc is not None and not math.isnan(esc):
+            fcr = 100.0 - esc
+            return float(max(0.0, min(100.0, round(fcr, 2))))
+
+        # Fallback: calcular directamente desde transfer_flag
         df = self.df
-        if "is_resolved" not in df.columns:
+        if "transfer_flag" not in df.columns or len(df) == 0:
             return float("nan")
+
+        col = df["transfer_flag"]
+
+        # Normalizar a booleano: TRUE/FALSE, 1/0, etc.
+        if col.dtype == "O":
+            col_norm = (
+                col.astype(str)
+                   .str.strip()
+                   .str.lower()
+                   .map({
+                       "true": True,
+                       "t": True,
+                       "1": True,
+                       "yes": True,
+                       "y": True,
+                   })
+            ).fillna(False)
+            transfer_mask = col_norm
+        else:
+            transfer_mask = pd.to_numeric(col, errors="coerce").fillna(0) > 0
 
         total = len(df)
-        if total == 0:
+        transfers = int(transfer_mask.sum())
+
+        esc_rate = transfers / total if total > 0 else float("nan")
+        if math.isnan(esc_rate):
             return float("nan")
 
-        resolved = df["is_resolved"].sum()
-        return float(round(resolved / total * 100, 2))
+        fcr = 100.0 - esc_rate * 100.0
+        return float(max(0.0, min(100.0, round(fcr, 2))))
+
 
     def escalation_rate(self) -> float:
         """

@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 
 export type TierKey = 'gold' | 'silver' | 'bronze';
+export type AnalysisSource = 'synthetic' | 'backend' | 'fallback';
 
 export interface Tier {
   name: string;
@@ -269,4 +270,5 @@ export interface AnalysisData {
   benchmarkData: BenchmarkDataPoint[];  // Actualizado de benchmarkReport
   agenticReadiness?: AgenticReadinessResult;  // v2.0: Nuevo campo
   staticConfig?: StaticConfig;  // v2.0: Configuración estática usada
+  source?: AnalysisSource;
 }
