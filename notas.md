@@ -16,3 +16,6 @@ npm run dev
 # Hacer que funcione de alguna manera el selector de JSON
 # Dockerizar
 # Limpieza de código
+
+# Todo es real, menos el benchmark y sus potential savings
+# Falta hacer funcionar los selectores de paquetes

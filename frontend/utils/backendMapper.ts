@@ -9,7 +9,7 @@ import type {
   EconomicModelData,
 } from '../types';
 import type { BackendRawResults } from './apiClient';
-import { BarChartHorizontal, Zap, DollarSign } from 'lucide-react';
+import { BarChartHorizontal, Zap, DollarSign, Smile, Target } from 'lucide-react';
 import type { HeatmapDataPoint, CustomerSegment } from '../types';
 
 
@@ -17,6 +17,21 @@ function safeNumber(value: any, fallback = 0): number {
   const n = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
+
+function normalizeAhtMetric(ahtSeconds: number): number {
+  if (!Number.isFinite(ahtSeconds) || ahtSeconds <= 0) return 0;
+
+  // Ajusta estos números si ves que tus AHTs reales son muy distintos
+  const MIN_AHT = 300;  // AHT muy bueno
+  const MAX_AHT = 1000; // AHT muy malo
+
+  const clamped = Math.max(MIN_AHT, Math.min(MAX_AHT, ahtSeconds));
+  const ratio = (clamped - MIN_AHT) / (MAX_AHT - MIN_AHT); // 0 (mejor) -> 1 (peor)
+  const score = 100 - ratio * 100; // 100 (mejor) -> 0 (peor)
+
+  return Math.round(score);
+}
+
 
 function inferTierFromScore(score: number): TierKey {
   if (score >= 8) return 'gold';
@@ -382,6 +397,145 @@ function buildPerformanceDimension(
   return dimension;
 }
 
+// ==== Satisfacción (customer_satisfaction) ====
+
+function buildSatisfactionDimension(
+  raw: BackendRawResults
+): DimensionAnalysis | undefined {
+  const cs = raw?.customer_satisfaction;
+  if (!cs) return undefined;
+
+  // CSAT global viene ya calculado en el backend (1–5)
+  const csatGlobalRaw = safeNumber(cs?.csat_global, NaN);
+  if (!Number.isFinite(csatGlobalRaw) || csatGlobalRaw <= 0) {
+    return undefined;
+  }
+
+  // Normalizamos 1–5 a 0–100
+  const csat = Math.max(1, Math.min(5, csatGlobalRaw));
+  const score = Math.max(
+    0,
+    Math.min(100, Math.round((csat / 5) * 100))
+  );
+
+  let summary = `CSAT global de ${csat.toFixed(1)}/5. `;
+
+  if (score >= 85) {
+    summary +=
+      'La satisfacción del cliente es muy alta y consistente en la mayoría de interacciones.';
+  } else if (score >= 70) {
+    summary +=
+      'La satisfacción del cliente es razonable, pero existen áreas claras de mejora en algunos journeys o motivos de contacto.';
+  } else {
+    summary +=
+      'La satisfacción del cliente se sitúa por debajo de los niveles objetivo y requiere un plan de mejora específico sobre los principales drivers de insatisfacción.';
+  }
+
+  const kpi: Kpi = {
+    label: 'CSAT global (backend)',
+    value: `${csat.toFixed(1)}/5`,
+  };
+
+  const dimension: DimensionAnalysis = {
+    id: 'satisfaction',
+    name: 'satisfaction',
+    title: 'Voz del cliente y satisfacción',
+    score,
+    percentile: undefined,
+    summary,
+    kpi,
+    icon: Smile,
+  };
+
+  return dimension;
+}
+
+// ==== Eficiencia (FCR + escalaciones + recurrencia) ====
+
+function buildEfficiencyDimension(
+  raw: BackendRawResults
+): DimensionAnalysis | undefined {
+  const op = raw?.operational_performance;
+  if (!op) return undefined;
+
+  // FCR: viene como porcentaje 0–100, o lo aproximamos a partir de escalaciones
+  const fcrPctRaw = safeNumber(op.fcr_rate, NaN);
+  const escRateRaw = safeNumber(op.escalation_rate, NaN);
+  const recurrenceRaw = safeNumber(op.recurrence_rate_7d, NaN);
+
+  const fcrPct = Number.isFinite(fcrPctRaw) && fcrPctRaw >= 0
+    ? Math.max(0, Math.min(100, fcrPctRaw))
+    : Number.isFinite(escRateRaw)
+      ? Math.max(0, Math.min(100, 100 - escRateRaw))
+      : NaN;
+
+  if (!Number.isFinite(fcrPct)) {
+    // Sin FCR ni escalaciones no podemos construir bien la dimensión
+    return undefined;
+  }
+
+  let score = fcrPct;
+
+  // Penalizar por escalaciones altas
+  if (Number.isFinite(escRateRaw)) {
+    const esc = escRateRaw as number;
+    if (esc > 20) score -= 20;
+    else if (esc > 10) score -= 10;
+    else if (esc > 5) score -= 5;
+  }
+
+  // Penalizar por recurrencia (repetición de contactos a 7 días)
+  if (Number.isFinite(recurrenceRaw)) {
+    const rec = recurrenceRaw as number; // asumimos ya en %
+    if (rec > 20) score -= 15;
+    else if (rec > 10) score -= 10;
+    else if (rec > 5) score -= 5;
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  const escText = Number.isFinite(escRateRaw)
+    ? `${(escRateRaw as number).toFixed(1)}%`
+    : 'N/D';
+  const recText = Number.isFinite(recurrenceRaw)
+    ? `${(recurrenceRaw as number).toFixed(1)}%`
+    : 'N/D';
+
+  let summary = `FCR estimado de ${fcrPct.toFixed(
+    1
+  )}%, con una tasa de escalación del ${escText} y una recurrencia a 7 días de ${recText}. `;
+
+  if (score >= 80) {
+    summary +=
+      'La operación presenta una alta tasa de resolución en primer contacto y pocas escalaciones, lo que indica procesos eficientes.';
+  } else if (score >= 60) {
+    summary +=
+      'La eficiencia es razonable, aunque existen oportunidades de mejora en la resolución al primer contacto y en la reducción de contactos repetidos.';
+  } else {
+    summary +=
+      'La eficiencia operativa es baja: hay demasiadas escalaciones o contactos repetidos, lo que impacta negativamente en costes y experiencia de cliente.';
+  }
+
+  const kpi: Kpi = {
+    label: 'FCR estimado (backend)',
+    value: `${fcrPct.toFixed(1)}%`,
+  };
+
+  const dimension: DimensionAnalysis = {
+    id: 'efficiency',
+    name: 'efficiency',
+    title: 'Resolución y eficiencia',
+    score,
+    percentile: undefined,
+    summary,
+    kpi,
+    icon: Target,
+  };
+
+  return dimension;
+}
+
+
 // ==== Economía y costes (economy_costs) ====
 
 function buildEconomicModel(raw: BackendRawResults): EconomicModelData {
@@ -572,12 +726,17 @@ export function mapBackendResultsToAnalysisData(
   const { dimension: volumetryDimension, extraKpis } =
     buildVolumetryDimension(raw);
   const performanceDimension = buildPerformanceDimension(raw);
+  const satisfactionDimension = buildSatisfactionDimension(raw);
   const economyDimension = buildEconomyDimension(raw);
+  const efficiencyDimension = buildEfficiencyDimension(raw);
 
   const dimensions: DimensionAnalysis[] = [];
   if (volumetryDimension) dimensions.push(volumetryDimension);
   if (performanceDimension) dimensions.push(performanceDimension);
+  if (satisfactionDimension) dimensions.push(satisfactionDimension);
   if (economyDimension) dimensions.push(economyDimension);
+  if (efficiencyDimension) dimensions.push(efficiencyDimension);
+
 
   const op = raw?.operational_performance;
   const cs = raw?.customer_satisfaction;
@@ -864,17 +1023,8 @@ export function buildHeatmapFromBackend(
     ); // 0-100
 
     // Métricas normalizadas 0-100 para el color del heatmap
-    const ahtMetric = aht_mean
-      ? Math.max(
-          0,
-          Math.min(
-            100,
-            Math.round(
-              100 - ((aht_mean - 240) / 310) * 100
-            )
-          )
-        )
-      : 0;
+    const ahtMetric = normalizeAhtMetric(aht_mean);
+;
 
     const holdMetric = hold_p50
       ? Math.max(

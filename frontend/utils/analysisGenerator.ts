@@ -228,6 +228,246 @@ const RECOMMENDATIONS: Recommendation[] = [
     },
 ];
 
+
+// === RECOMENDACIONES BASADAS EN DATOS REALES ===
+const MAX_RECOMMENDATIONS = 4;
+
+const generateRecommendationsFromData = (
+  analysis: AnalysisData
+): Recommendation[] => {
+  const dimensions = analysis.dimensions || [];
+  const dimScoreMap = new Map<string, number>();
+
+  dimensions.forEach((d) => {
+    if (d.id && typeof d.score === 'number') {
+      dimScoreMap.set(d.id, d.score);
+    }
+  });
+
+  const overallScore =
+    typeof analysis.overallHealthScore === 'number'
+      ? analysis.overallHealthScore
+      : 70;
+
+  const econ = analysis.economicModel;
+  const annualSavings = econ?.annualSavings ?? 0;
+  const currentCost = econ?.currentAnnualCost ?? 0;
+
+  // Relevancia por recomendación
+  const scoredTemplates = RECOMMENDATIONS.map((tpl, index) => {
+    const dimId = tpl.dimensionId || 'overall';
+    const dimScore = dimScoreMap.get(dimId) ?? overallScore;
+
+    let relevance = 0;
+
+    // 1) Dimensiones débiles => más relevancia
+    if (dimScore < 60) relevance += 3;
+    else if (dimScore < 75) relevance += 2;
+    else if (dimScore < 85) relevance += 1;
+
+    // 2) Prioridad declarada en la plantilla
+    if (tpl.priority === 'high') relevance += 2;
+    else if (tpl.priority === 'medium') relevance += 1;
+
+    // 3) Refuerzo en función del potencial económico
+    if (
+      annualSavings > 0 &&
+      currentCost > 0 &&
+      annualSavings / currentCost > 0.15 &&
+      dimId === 'economy'
+    ) {
+      relevance += 2;
+    }
+
+    // 4) Ligera penalización si la dimensión ya está muy bien (>85)
+    if (dimScore > 85) relevance -= 1;
+
+    return {
+      tpl,
+      relevance,
+      index, // por si queremos desempatar
+    };
+  });
+
+  // Filtramos las que no aportan nada (relevance <= 0)
+  let filtered = scoredTemplates.filter((s) => s.relevance > 0);
+
+  // Si ninguna pasa el filtro (por ejemplo, todo muy bien),
+  // nos quedamos al menos con 2–3 de las de mayor prioridad
+  if (filtered.length === 0) {
+    filtered = scoredTemplates
+      .slice()
+      .sort((a, b) => {
+        const prioWeight = (p?: 'high' | 'medium' | 'low') => {
+          if (p === 'high') return 3;
+          if (p === 'medium') return 2;
+          return 1;
+        };
+        return (
+          prioWeight(b.tpl.priority) - prioWeight(a.tpl.priority)
+        );
+      })
+      .slice(0, MAX_RECOMMENDATIONS);
+  } else {
+    // Ordenamos por relevancia (desc), y en empate, por orden original
+    filtered.sort((a, b) => {
+      if (b.relevance !== a.relevance) {
+        return b.relevance - a.relevance;
+      }
+      return a.index - b.index;
+    });
+  }
+
+  const selected = filtered.slice(0, MAX_RECOMMENDATIONS).map((s) => s.tpl);
+
+  // Mapear a tipo Recommendation completo
+  return selected.map((rec, i): Recommendation => ({
+    priority:
+      rec.priority || (i === 0 ? ('high' as const) : ('medium' as const)),
+    title: rec.title || 'Recomendación',
+    description: rec.description || rec.text,
+    impact:
+      rec.impact ||
+      'Mejora estimada del 10-20% en los KPIs clave.',
+    timeline: rec.timeline || '4-8 semanas',
+    // campos obligatorios:
+    text:
+      rec.text ||
+      rec.description ||
+      'Recomendación prioritaria basada en el análisis de datos.',
+    dimensionId: rec.dimensionId || 'overall',
+  }));
+};
+
+// === FINDINGS BASADOS EN DATOS REALES ===
+
+const MAX_FINDINGS = 5;
+
+const generateFindingsFromData = (
+  analysis: AnalysisData
+): Finding[] => {
+  const dimensions = analysis.dimensions || [];
+  const dimScoreMap = new Map<string, number>();
+
+  dimensions.forEach((d) => {
+    if (d.id && typeof d.score === 'number') {
+      dimScoreMap.set(d.id, d.score);
+    }
+  });
+
+  const overallScore =
+    typeof analysis.overallHealthScore === 'number'
+      ? analysis.overallHealthScore
+      : 70;
+
+  // Miramos volumetría para reforzar algunos findings
+  const volumetryDim = dimensions.find(
+    (d) => d.id === 'volumetry_distribution'
+  );
+  const offHoursPct =
+    volumetryDim?.distribution_data?.off_hours_pct ?? 0;
+
+  // Relevancia por finding
+  const scoredTemplates = KEY_FINDINGS.map((tpl, index) => {
+    const dimId = tpl.dimensionId || 'overall';
+    const dimScore = dimScoreMap.get(dimId) ?? overallScore;
+
+    let relevance = 0;
+
+    // 1) Dimensiones débiles => más relevancia
+    if (dimScore < 60) relevance += 3;
+    else if (dimScore < 75) relevance += 2;
+    else if (dimScore < 85) relevance += 1;
+
+    // 2) Tipo de finding (critical > warning > info)
+    if (tpl.type === 'critical') relevance += 3;
+    else if (tpl.type === 'warning') relevance += 2;
+    else relevance += 1;
+
+    // 3) Impacto (high > medium > low)
+    if (tpl.impact === 'high') relevance += 2;
+    else if (tpl.impact === 'medium') relevance += 1;
+
+    // 4) Refuerzo en volumetría si hay mucha demanda fuera de horario
+    if (
+      offHoursPct > 0.25 &&
+      tpl.dimensionId === 'volumetry_distribution'
+    ) {
+      relevance += 2;
+      if (
+        tpl.title?.toLowerCase().includes('fuera de horario') ||
+        tpl.text
+          ?.toLowerCase()
+          .includes('fuera del horario laboral')
+      ) {
+        relevance += 1;
+      }
+    }
+
+    return {
+      tpl,
+      relevance,
+      index,
+    };
+  });
+
+  // Filtramos los que no aportan nada (relevance <= 0)
+  let filtered = scoredTemplates.filter((s) => s.relevance > 0);
+
+  // Si nada pasa el filtro, cogemos al menos algunos por prioridad/tipo
+  if (filtered.length === 0) {
+    filtered = scoredTemplates
+      .slice()
+      .sort((a, b) => {
+        const typeWeight = (t?: Finding['type']) => {
+          if (t === 'critical') return 3;
+          if (t === 'warning') return 2;
+          return 1;
+        };
+        const impactWeight = (imp?: string) => {
+          if (imp === 'high') return 3;
+          if (imp === 'medium') return 2;
+          return 1;
+        };
+        const scoreA =
+          typeWeight(a.tpl.type) + impactWeight(a.tpl.impact);
+        const scoreB =
+          typeWeight(b.tpl.type) + impactWeight(b.tpl.impact);
+        return scoreB - scoreA;
+      })
+      .slice(0, MAX_FINDINGS);
+  } else {
+    // Ordenamos por relevancia (desc), y en empate, por orden original
+    filtered.sort((a, b) => {
+      if (b.relevance !== a.relevance) {
+        return b.relevance - a.relevance;
+      }
+      return a.index - b.index;
+    });
+  }
+
+  const selected = filtered.slice(0, MAX_FINDINGS).map((s) => s.tpl);
+
+  // Mapear a tipo Finding completo
+  return selected.map((finding, i): Finding => ({
+    type:
+      finding.type ||
+      (i === 0
+        ? ('warning' as const)
+        : ('info' as const)),
+    title: finding.title || 'Hallazgo',
+    description: finding.description || finding.text,
+    // campos obligatorios:
+    text:
+      finding.text ||
+      finding.description ||
+      'Hallazgo relevante basado en datos.',
+    dimensionId: finding.dimensionId || 'overall',
+    impact: finding.impact,
+  }));
+};
+
+
 const generateFindingsFromTemplates = (): Finding[] => {
   return [
     ...new Set(
@@ -478,6 +718,123 @@ const generateEconomicModelData = (): EconomicModelData => {
     };
 };
 
+// v2.x: Generar Opportunity Matrix a partir de datos REALES (heatmap + modelo económico)
+const generateOpportunitiesFromHeatmap = (
+  heatmapData: HeatmapDataPoint[],
+  economicModel?: EconomicModelData
+): Opportunity[] => {
+  if (!heatmapData || heatmapData.length === 0) return [];
+
+  // Ahorro anual total calculado por el backend (si existe)
+  const globalSavings = economicModel?.annualSavings ?? 0;
+
+  // 1) Calculamos un "peso" por skill en función de:
+  //    - coste anual
+  //    - ineficiencia (FCR bajo)
+  //    - readiness (facilidad para automatizar)
+  const scored = heatmapData.map((h) => {
+    const annualCost = h.annual_cost ?? 0;
+    const readiness = h.automation_readiness ?? 0;
+    const fcrScore = h.metrics?.fcr ?? 0;
+
+    // FCR bajo => más ineficiencia
+    const ineffPenalty = Math.max(0, 100 - fcrScore); // 0–100
+    // Peso base: coste alto + ineficiencia alta + readiness alto
+    const baseWeight =
+      annualCost *
+      (1 + ineffPenalty / 100) *
+      (0.3 + 0.7 * (readiness / 100));
+
+    const weight = !Number.isFinite(baseWeight) || baseWeight < 0 ? 0 : baseWeight;
+
+    return { heat: h, weight };
+  });
+
+  const totalWeight =
+    scored.reduce((sum, s) => sum + s.weight, 0) || 1;
+
+  // 2) Asignamos "savings" (ahorro potencial) por skill
+  const opportunitiesWithSavings = scored.map((s) => {
+    const { heat } = s;
+    const annualCost = heat.annual_cost ?? 0;
+
+    // Si el backend nos da un ahorro anual total, lo distribuimos proporcionalmente
+    const savings =
+      globalSavings > 0 && totalWeight > 0
+        ? (globalSavings * s.weight) / totalWeight
+        : // Si no hay dato de ahorro global, suponemos un 20% del coste anual
+          annualCost * 0.2;
+
+    return {
+      heat,
+      savings: Math.max(0, savings),
+    };
+  });
+
+  const maxSavings =
+    opportunitiesWithSavings.reduce(
+      (max, s) => (s.savings > max ? s.savings : max),
+      0
+    ) || 1;
+
+  // 3) Construimos cada oportunidad
+  return opportunitiesWithSavings.map((item, index) => {
+    const { heat, savings } = item;
+    const skillName = heat.skill || `Skill ${index + 1}`;
+
+    // Impacto: relativo al mayor ahorro
+    const impactRaw = (savings / maxSavings) * 10;
+    const impact = Math.max(
+      3,
+      Math.min(10, Math.round(impactRaw))
+    );
+
+    // Factibilidad base: a partir del automation_readiness (0–100)
+    const readiness = heat.automation_readiness ?? 0;
+    const feasibilityRaw = (readiness / 100) * 7 + 3; // 3–10
+    const feasibility = Math.max(
+      3,
+      Math.min(10, Math.round(feasibilityRaw))
+    );
+
+    // Dimensión a la que lo vinculamos (solo decorativo de momento)
+    const dimensionId =
+      readiness >= 70
+        ? 'volumetry_distribution'
+        : readiness >= 40
+        ? 'efficiency'
+        : 'economy';
+
+    // Segmento de cliente (high/medium/low) si lo tenemos
+    const customer_segment = heat.segment;
+
+    // Nombre legible que incluye el skill -> esto ayuda a
+    // OpportunityMatrixPro a encontrar el skill en el heatmap
+    const namePrefix =
+      readiness >= 70
+        ? 'Automatizar '
+        : readiness >= 40
+        ? 'Augmentar con IA en '
+        : 'Optimizar proceso en ';
+
+    const idSlug = skillName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+    return {
+      id: `opp_${index + 1}_${idSlug}`,
+      name: `${namePrefix}${skillName}`,
+      impact,
+      feasibility,
+      savings: Math.round(savings),
+      dimensionId,
+      customer_segment,
+    };
+  });
+};
+
+
 // v2.0: Añadir percentiles múltiples
 const generateBenchmarkData = (): BenchmarkDataPoint[] => {
     const userAHT = randomInt(380, 450);
@@ -557,7 +914,7 @@ export const generateAnalysis = async (
 
     // 1) Intentar backend + mapeo
     try {
-        const raw = await callAnalysisApiRaw({
+      const raw = await callAnalysisApiRaw({
         tier,
         costPerHour,
         avgCsat,
@@ -567,16 +924,7 @@ export const generateAnalysis = async (
 
       const mapped = mapBackendResultsToAnalysisData(raw, tier);
 
-      // 👉 Rellenamos desde el frontend las partes que el backend aún no devuelve
-      mapped.findings = generateFindingsFromTemplates();
-      mapped.recommendations = generateRecommendationsFromTemplates();
-      mapped.opportunities = generateOpportunityMatrixData();
-      mapped.roadmap = generateRoadmapData();
-
-      // Benchmark: de momento no tenemos datos reales -> no lo generamos en modo backend
-      mapped.benchmarkData = [];
-
-      // Heatmap: ahora se construye a partir de datos reales del backend
+      // Heatmap: primero lo construimos a partir de datos reales del backend
       mapped.heatmapData = buildHeatmapFromBackend(
         raw,
         costPerHour,
@@ -584,9 +932,25 @@ export const generateAnalysis = async (
         segmentMapping
       );
 
+      // Oportunidades: AHORA basadas en heatmap real + modelo económico del backend
+      mapped.opportunities = generateOpportunitiesFromHeatmap(
+        mapped.heatmapData,
+        mapped.economicModel
+      );
 
-      console.log('✅ Usando resultados del backend mapeados + findings/benchmark del frontend');
+      // 👉 El resto sigue siendo "frontend-driven" de momento
+      mapped.findings = generateFindingsFromData(mapped);
+      mapped.recommendations = generateRecommendationsFromData(mapped);
+      mapped.roadmap = generateRoadmapData();
+
+      // Benchmark: de momento no tenemos datos reales -> no lo generamos en modo backend
+      mapped.benchmarkData = [];
+
+      console.log(
+        '✅ Usando resultados del backend mapeados (heatmap + opportunities reales)'
+      );
       return mapped;
+
 
     } catch (apiError) {
       console.error(

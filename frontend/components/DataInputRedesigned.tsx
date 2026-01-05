@@ -91,7 +91,7 @@ const DataInputRedesigned: React.FC<DataInputRedesignedProps> = ({
         setUploadMethod('file');
         toast.success(`Archivo "${selectedFile.name}" cargado`, { icon: '📄' });
       } else {
-        toast.error('Tipo de archivo no válido. Sube un CSV o Excel.', { icon: '❌' });
+        toast.error('Tipo de archivo no válido. Sube un CSV.', { icon: '❌' });
       }
     }
   };
@@ -393,7 +393,7 @@ const DataInputRedesigned: React.FC<DataInputRedesignedProps> = ({
               <div className="flex-1">
                 <h4 className="font-semibold text-slate-900 mb-2 flex items-center gap-2">
                   <UploadCloud size={18} className="text-[#6D84E3]" />
-                  Subir Archivo CSV/Excel
+                  Subir Archivo CSV
                 </h4>
                 
                 {uploadMethod === 'file' && (
@@ -447,7 +447,8 @@ const DataInputRedesigned: React.FC<DataInputRedesignedProps> = ({
             </div>
           </div>
           
-          {/* Opción 2: URL Google Sheets */}
+
+          {/* Opción 2: URL Google Sheets 
           <div className={clsx(
             'border-2 rounded-lg p-4 transition-all',
             uploadMethod === 'url' ? 'border-[#6D84E3] bg-blue-50' : 'border-slate-300'
@@ -486,6 +487,7 @@ const DataInputRedesigned: React.FC<DataInputRedesignedProps> = ({
               </div>
             </div>
           </div>
+          */}
           
           {/* Opción 3: Datos sintéticos */}
           <div className={clsx(
