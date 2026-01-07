@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: beyond-backend
+    environment:
+      # credenciales del API (las mismas que usas ahora)
+      BASIC_AUTH_USERNAME: admin
+      BASIC_AUTH_PASSWORD: admin
+    expose:
+      - "8000"
+    networks:
+      - beyond-net
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # el front compilará con este BASE_URL -> /api
+        VITE_API_BASE_URL: /api
+    container_name: beyond-frontend
+    expose:
+      - "4173"
+    networks:
+      - beyond-net
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: beyond-nginx
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    networks:
+      - beyond-net
+
+networks:
+  beyond-net:
+    driver: bridge

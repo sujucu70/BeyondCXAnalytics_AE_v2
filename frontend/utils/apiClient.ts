@@ -8,7 +8,7 @@ type SegmentMapping = {
 };
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+  import.meta.env.VITE_API_BASE_URL || '';
 
 function getAuthHeader(): Record<string, string> {
   const user = import.meta.env.VITE_API_USERNAME;
