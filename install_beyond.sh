@@ -5,7 +5,7 @@ set -euo pipefail
 # CONFIGURACIÓN BÁSICA – EDITA ESTO
 ###############################################
 # TODO: pon aquí la URL real de tu repo (sin credenciales)
-REPO_URL_DEFAULT="https://github.com/tu-usuario/BeyondDiagnosis.git"
+REPO_URL_DEFAULT="https://github.com/igferne/Beyond-Diagnosis.git"
 INSTALL_DIR="/opt/beyonddiagnosis"
 
 ###############################################
@@ -28,7 +28,7 @@ require_root() {
 ###############################################
 # 1. COMPROBACIONES INICIALES
 ###############################################
-require_root()
+require_root
 
 step "Recogiendo datos de configuración"
 
