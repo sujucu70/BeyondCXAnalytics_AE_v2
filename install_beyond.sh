@@ -4,8 +4,8 @@ set -euo pipefail
 ###############################################
 # CONFIGURACIÓN BÁSICA – EDITA ESTO
 ###############################################
-# TODO: pon aquí la URL real de tu repo
-REPO_URL_DEFAULT="https://github.com/igferne/Beyond-Diagnosis.git"
+# TODO: pon aquí la URL real de tu repo (sin credenciales)
+REPO_URL_DEFAULT="https://github.com/tu-usuario/BeyondDiagnosis.git"
 INSTALL_DIR="/opt/beyonddiagnosis"
 
 ###############################################
@@ -28,7 +28,7 @@ require_root() {
 ###############################################
 # 1. COMPROBACIONES INICIALES
 ###############################################
-require_root
+require_root()
 
 step "Recogiendo datos de configuración"
 
@@ -57,15 +57,44 @@ if [ -z "$API_PASS" ]; then
   exit 1
 fi
 
-read -rp "URL del repositorio Git [$REPO_URL_DEFAULT]: " REPO_URL
+echo
+read -rp "URL del repositorio Git (HTTPS, sin credenciales) [$REPO_URL_DEFAULT]: " REPO_URL
 REPO_URL=${REPO_URL:-$REPO_URL_DEFAULT}
+
+echo
+read -rp "¿El repositorio es PRIVADO en GitHub y necesitas token? [s/N]: " IS_PRIVATE
+IS_PRIVATE=${IS_PRIVATE:-N}
+
+GIT_CLONE_URL="$REPO_URL"
+if [[ "$IS_PRIVATE" =~ ^[sS]$ ]]; then
+  echo "Introduce un Personal Access Token (PAT) de GitHub con permiso de lectura del repo."
+  read -rsp "GitHub PAT: " GITHUB_TOKEN
+  echo
+  if [ -z "$GITHUB_TOKEN" ]; then
+    echo "El token no puede estar vacío si el repo es privado."
+    exit 1
+  fi
+
+  # Construimos una URL del tipo: https://TOKEN@github.com/usuario/repo.git
+  if [[ "$REPO_URL" =~ ^https:// ]]; then
+    GIT_CLONE_URL="https://${GITHUB_TOKEN}@${REPO_URL#https://}"
+  else
+    echo "La URL del repositorio debe empezar por https:// para usar el token."
+    exit 1
+  fi
+fi
 
 echo
 echo "Resumen de configuración:"
 echo "  Dominio:         $DOMAIN"
 echo "  Email Let'sEnc:  $EMAIL"
 echo "  Usuario API:     $API_USER"
-echo "  Repo:            $REPO_URL"
+echo "  Repo (visible):  $REPO_URL"
+if [[ "$IS_PRIVATE" =~ ^[sS]$ ]]; then
+  echo "  Repo privado:    Sí (se usará un PAT sólo para el clon inicial)"
+else
+  echo "  Repo privado:    No"
+fi
 echo
 
 read -rp "¿Continuar con la instalación? [s/N]: " CONFIRM
@@ -137,7 +166,8 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   git -C "$INSTALL_DIR" pull --ff-only
 else
   rm -rf "$INSTALL_DIR"
-  git clone "$REPO_URL" "$INSTALL_DIR"
+  echo "Clonando repositorio..."
+  git clone "$GIT_CLONE_URL" "$INSTALL_DIR"
 fi
 
 cd "$INSTALL_DIR"
