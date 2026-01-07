@@ -36,8 +36,9 @@ export async function callAnalysisApiRaw(params: {
   avgCsat: number;
   segmentMapping?: SegmentMapping;
   file: File;
+  authHeaderOverride?: string;
 }): Promise<BackendRawResults> {
-  const { costPerHour, segmentMapping, file } = params;
+  const { costPerHour, segmentMapping, file, authHeaderOverride } = params;
 
   if (!file) {
     throw new Error('No se ha proporcionado ningún archivo CSV');
@@ -73,31 +74,32 @@ export async function callAnalysisApiRaw(params: {
     formData.append('economy_json', JSON.stringify(economyData));
   }
 
+  // Si nos pasan un Authorization desde el login, lo usamos.
+  // Si no, caemos al getAuthHeader() basado en variables de entorno (útil en dev).
+  const authHeaders: Record<string, string> = authHeaderOverride
+    ? { Authorization: authHeaderOverride }
+    : getAuthHeader();
+
   const response = await fetch(`${API_BASE_URL}/analysis`, {
     method: 'POST',
     body: formData,
     headers: {
-      ...getAuthHeader(),
+      ...authHeaders,
     },
   });
 
   if (!response.ok) {
-    let errorText = `Error API (${response.status})`;
-    try {
-      const errorBody = await response.json();
-      if (errorBody?.detail) {
-        errorText = String(errorBody.detail);
-      }
-    } catch {
-      // ignoramos si no es JSON
-    }
-    throw new Error(errorText);
+    const error = new Error(
+      `Error en API /analysis: ${response.status} ${response.statusText}`
+    );
+    (error as any).status = response.status;
+    throw error;
   }
 
-  const data = await response.json();
-  const rawResults = data.results ?? data;
+  // ⬇️ IMPORTANTE: nos quedamos solo con `results`
+  const json = await response.json();
+  const results = (json as any)?.results ?? json;
 
-  console.debug('🔍 Backend /analysis raw results:', rawResults);
-
-  return rawResults;
+  return results as BackendRawResults;
 }
+

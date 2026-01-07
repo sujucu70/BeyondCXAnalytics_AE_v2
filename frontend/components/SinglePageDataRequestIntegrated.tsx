@@ -10,6 +10,7 @@ import DataInputRedesigned from './DataInputRedesigned';
 import DashboardReorganized from './DashboardReorganized';
 import { generateAnalysis } from '../utils/analysisGenerator';
 import toast from 'react-hot-toast';
+import { useAuth } from '../utils/AuthContext';
 
 const SinglePageDataRequestIntegrated: React.FC = () => {
   const [selectedTier, setSelectedTier] = useState<TierKey>('silver');
@@ -20,6 +21,9 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
   const handleTierSelect = (tier: TierKey) => {
     setSelectedTier(tier);
   };
+
+  const { authHeader, logout } = useAuth();
+  
 
   const handleAnalyze = (config: {
     costPerHour: number;
@@ -44,6 +48,12 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
       toast.error('Por favor, sube un archivo, introduce una URL o genera datos sintéticos.');
       return;
     }
+  
+    // 🔐 Si usamos CSV real, exigir estar logado
+    if (config.file && !config.useSynthetic && !authHeader) {
+      toast.error('Debes iniciar sesión para analizar datos reales.');
+      return;
+    }
     
     setIsAnalyzing(true);
     toast.loading('Generando análisis...', { id: 'analyzing' });
@@ -58,7 +68,8 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
           config.segmentMapping,
           config.file,
           config.sheetUrl,
-          config.useSynthetic
+          config.useSynthetic,
+          authHeader || undefined
         );
         console.log('✅ Analysis generated successfully');
         
@@ -74,7 +85,15 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
         console.error('❌ Error generating analysis:', error);
         setIsAnalyzing(false);
         toast.dismiss('analyzing');
-        toast.error('Error al generar el análisis: ' + (error as Error).message);
+
+        const msg = (error as Error).message || '';
+
+        if (msg.includes('401')) {
+          toast.error('Sesión caducada o credenciales incorrectas. Vuelve a iniciar sesión.');
+          logout();
+        } else {
+          toast.error('Error al generar el análisis: ' + msg);
+        }
       }
     }, 1500);
   };
@@ -131,6 +150,12 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
             <p className="text-lg text-slate-600">
               Análisis de Readiness Agéntico para Contact Centers
             </p>
+            <button
+              onClick={logout}
+              className="text-xs text-slate-500 hover:text-slate-800 underline mt-1"
+            >
+              Cerrar sesión
+            </button>
           </motion.div>
 
           {/* Tier Selection */}

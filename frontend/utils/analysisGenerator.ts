@@ -905,7 +905,8 @@ export const generateAnalysis = async (
   segmentMapping?: { high_value_queues: string[]; medium_value_queues: string[]; low_value_queues: string[] },
   file?: File,
   sheetUrl?: string,
-  useSynthetic?: boolean
+  useSynthetic?: boolean,
+  authHeaderOverride?: string 
 ): Promise<AnalysisData> => {
   // Si hay archivo, procesarlo
   // Si hay archivo, primero intentamos usar el backend
@@ -920,6 +921,7 @@ export const generateAnalysis = async (
         avgCsat,
         segmentMapping,
         file,
+        authHeaderOverride,
       });
 
       const mapped = mapBackendResultsToAnalysisData(raw, tier);
@@ -952,7 +954,18 @@ export const generateAnalysis = async (
       return mapped;
 
 
-    } catch (apiError) {
+    } catch (apiError: any) {
+      const status = apiError?.status;
+      const msg = (apiError as Error).message || '';
+
+      // 🔐 Si es un error de autenticación (401), NO hacemos fallback
+      if (status === 401 || msg.includes('401')) {
+        console.error(
+          '❌ Error de autenticación en backend, abortando análisis (sin fallback).'
+        );
+        throw apiError;
+      }
+
       console.error(
         '❌ Backend /analysis no disponible o mapeo incompleto, fallback a lógica local:',
         apiError
