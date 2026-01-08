@@ -257,28 +257,40 @@ class OperationalPerformanceMetrics:
         - Si hay dos contactos consecutivos separados < 7 días, cuenta como "recurrente"
         - Tasa = nº clientes recurrentes / nº total de clientes
         """
+
         df = self.df.dropna(subset=["datetime_start"]).copy()
-        if df["customer_id"].isna().all():
+
+        # Normalizar identificador de cliente
+        if "customer_id" not in df.columns:
+            if "caller_id" in df.columns:
+                df["customer_id"] = df["caller_id"]
+            else:
+                # No hay identificador de cliente -> no se puede calcular
+                return float("nan")
+
+        df = df.dropna(subset=["customer_id"])
+        if df.empty:
             return float("nan")
 
-        customers = df["customer_id"].dropna().unique()
-        if len(customers) == 0:
+        # Ordenar por cliente + fecha
+        df = df.sort_values(["customer_id", "datetime_start"])
+
+        # Diferencia de tiempo entre contactos consecutivos por cliente
+        df["delta"] = df.groupby("customer_id")["datetime_start"].diff()
+
+        # Marcamos los contactos que ocurren a menos de 7 días del anterior
+        recurrence_mask = df["delta"] < pd.Timedelta(days=7)
+
+        # Nº de clientes que tienen al menos un contacto recurrente
+        recurrent_customers = df.loc[recurrence_mask, "customer_id"].nunique()
+        total_customers = df["customer_id"].nunique()
+
+        if total_customers == 0:
             return float("nan")
 
-        recurrent_customers = 0
+        rate = recurrent_customers / total_customers * 100.0
+        return float(round(rate, 2))
 
-        for cust in customers:
-            sub = df[df["customer_id"] == cust].sort_values("datetime_start")
-            if len(sub) < 2:
-                continue
-            deltas = sub["datetime_start"].diff().dropna()
-            if (deltas < pd.Timedelta(days=7)).any():
-                recurrent_customers += 1
-
-        if len(customers) == 0:
-            return float("nan")
-
-        return float(round(recurrent_customers / len(customers) * 100, 2))
 
     def repeat_channel_rate(self) -> float:
         """
