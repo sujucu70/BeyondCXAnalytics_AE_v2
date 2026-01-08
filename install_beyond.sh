@@ -236,11 +236,14 @@ server {
     listen 80;
     server_name $DOMAIN;
     return 301 https://\$host\$request_uri;
+    client_max_body_size 1024M;
 }
 
 server {
     listen 443 ssl;
     server_name $DOMAIN;
+
+    client_max_body_size 1024M;
 
     ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
@@ -265,6 +268,11 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout    600s;
+        proxy_read_timeout    600s;
+        send_timeout          600s;
     }
 }
 EOF
