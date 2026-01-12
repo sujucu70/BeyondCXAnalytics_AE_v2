@@ -7,7 +7,7 @@ import { Toaster } from 'react-hot-toast';
 import { TierKey, AnalysisData } from '../types';
 import TierSelectorEnhanced from './TierSelectorEnhanced';
 import DataInputRedesigned from './DataInputRedesigned';
-import DashboardReorganized from './DashboardReorganized';
+import DashboardTabs from './DashboardTabs';
 import { generateAnalysis } from '../utils/analysisGenerator';
 import toast from 'react-hot-toast';
 import { useAuth } from '../utils/AuthContext';
@@ -111,7 +111,7 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
     console.log('📊 Dimensions length:', analysisData.dimensions?.length);
     
     try {
-      return <DashboardReorganized analysisData={analysisData} onBack={handleBackToForm} />;
+      return <DashboardTabs data={analysisData} onBack={handleBackToForm} />;
     } catch (error) {
       console.error('❌ Error rendering dashboard:', error);
       return (

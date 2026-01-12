@@ -102,14 +102,13 @@ export interface Kpi {
   changeType?: 'positive' | 'negative' | 'neutral';
 }
 
-// v2.0: Dimensiones reducidas de 8 a 6
-export type DimensionName = 
-  | 'volumetry_distribution'  // Volumetría y Distribución Horaria (fusión + ampliación)
-  | 'performance'             // Rendimiento
-  | 'satisfaction'            // Satisfacción
-  | 'economy'                 // Economía
-  | 'efficiency'              // Eficiencia (fusiona efficiency + effectiveness)
-  | 'benchmark';              // Benchmark
+// v3.0: 5 dimensiones viables
+export type DimensionName =
+  | 'volumetry_distribution'      // Volumetría & Distribución
+  | 'operational_efficiency'      // Eficiencia Operativa
+  | 'effectiveness_resolution'    // Efectividad & Resolución
+  | 'complexity_predictability'   // Complejidad & Predictibilidad
+  | 'agentic_readiness';          // Agentic Readiness
 
 export interface SubFactor {
   name: string;

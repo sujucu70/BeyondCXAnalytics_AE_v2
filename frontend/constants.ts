@@ -6,17 +6,17 @@ export const TIERS: TiersData = {
     name: 'Análisis GOLD',
     price: 4900,
     color: 'bg-yellow-500',
-    description: '6 dimensiones completas con algoritmo Agentic Readiness avanzado',
+    description: '5 dimensiones completas con Agentic Readiness avanzado',
     requirements: 'CCaaS moderno (Genesys, Five9, NICE, Talkdesk)',
     timeline: '3-4 semanas',
     features: [
-      '6 dimensiones completas',
-      'Algoritmo Agentic Readiness avanzado (6 sub-factores)',
-      'Análisis de distribución horaria',
-      'Segmentación de clientes (opcional)',
-      'Benchmark con percentiles múltiples (P25, P50, P75, P90)',
+      '5 dimensiones: Volumetría, Eficiencia, Efectividad, Complejidad, Agentic Readiness',
+      'Agentic Readiness Score 0-10 por cola',
+      'Análisis de distribución horaria y semanal',
+      'Métricas P10/P50/P90 por cola',
+      'FCR proxy y tasa de transferencias',
+      'Análisis de variabilidad y predictibilidad',
       'Roadmap ejecutable con 3 waves',
-      'Modelo económico con NPV y análisis de sensibilidad',
       'Sesión de presentación incluida'
     ]
   },
@@ -24,15 +24,14 @@ export const TIERS: TiersData = {
     name: 'Análisis SILVER',
     price: 3500,
     color: 'bg-gray-400',
-    description: '4 dimensiones core con Agentic Readiness simplificado',
+    description: '5 dimensiones con Agentic Readiness simplificado',
     requirements: 'Sistema ACD/PBX con reporting básico',
     timeline: '2-3 semanas',
     features: [
-      '4 dimensiones (Volumetría, Rendimiento, Economía, Agentic Readiness)',
-      'Algoritmo Agentic Readiness simplificado (3 sub-factores)',
+      '5 dimensiones completas',
+      'Agentic Readiness simplificado (4 sub-factores)',
       'Roadmap de implementación',
       'Opportunity Matrix',
-      'Economic Model básico',
       'Dashboard interactivo'
     ]
   },
@@ -40,15 +39,14 @@ export const TIERS: TiersData = {
     name: 'Análisis EXPRESS',
     price: 1950,
     color: 'bg-orange-600',
-    description: '3 dimensiones fundamentales sin Agentic Readiness',
+    description: '4 dimensiones fundamentales sin Agentic Readiness detallado',
     requirements: 'Exportación básica de reportes',
     timeline: '1-2 semanas',
     features: [
-      '3 dimensiones core (Volumetría, Rendimiento, Economía)',
+      '4 dimensiones core (Volumetría, Eficiencia, Efectividad, Complejidad)',
+      'Agentic Readiness básico',
       'Roadmap cualitativo',
-      'Análisis básico',
-      'Recomendaciones estratégicas',
-      'Reporte ejecutivo'
+      'Recomendaciones estratégicas'
     ]
   }
 };
@@ -136,14 +134,13 @@ export const DATA_REQUIREMENTS: DataRequirementsData = {
   }
 };
 
-// v2.0: Dimensiones actualizadas (6 en lugar de 8)
+// v3.0: 5 dimensiones viables
 export const DIMENSION_NAMES = {
-  volumetry_distribution: 'Volumetría y Distribución Horaria',
-  performance: 'Rendimiento',
-  satisfaction: 'Satisfacción',
-  economy: 'Economía',
-  efficiency: 'Eficiencia',  // Fusiona Eficiencia + Efectividad
-  benchmark: 'Benchmark'
+  volumetry_distribution: 'Volumetría & Distribución',
+  operational_efficiency: 'Eficiencia Operativa',
+  effectiveness_resolution: 'Efectividad & Resolución',
+  complexity_predictability: 'Complejidad & Predictibilidad',
+  agentic_readiness: 'Agentic Readiness'
 };
 
 // v2.0: Ponderaciones para Agentic Readiness Score

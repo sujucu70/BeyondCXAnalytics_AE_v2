@@ -2,7 +2,7 @@
 import type { AnalysisData, Kpi, DimensionAnalysis, HeatmapDataPoint, Opportunity, RoadmapInitiative, EconomicModelData, BenchmarkDataPoint, Finding, Recommendation, TierKey, CustomerSegment } from '../types';
 import { generateAnalysisFromRealData } from './realDataAnalysis';
 import { RoadmapPhase } from '../types';
-import { BarChartHorizontal, Zap, Smile, DollarSign, Target, Globe } from 'lucide-react';
+import { BarChartHorizontal, Zap, Target, Brain, Bot } from 'lucide-react';
 import { calculateAgenticReadinessScore, type AgenticReadinessInput } from './agenticReadinessV2';
 import { callAnalysisApiRaw } from './apiClient';
 import {
@@ -30,14 +30,14 @@ const getScoreColor = (score: number): 'green' | 'yellow' | 'red' => {
   return 'red';
 };
 
-// v2.0: 6 DIMENSIONES (eliminadas Complejidad y Efectividad)
+// v3.0: 5 DIMENSIONES VIABLES
 const DIMENSIONS_CONTENT = {
     volumetry_distribution: {
         icon: BarChartHorizontal,
-        titles: ["Volumetría y Distribución Horaria", "Análisis de la Demanda"],
+        titles: ["Volumetría & Distribución", "Análisis de la Demanda"],
         summaries: {
-            good: ["El volumen de interacciones se alinea con las previsiones, permitiendo una planificación de personal precisa.", "La distribución horaria es uniforme con picos predecibles, facilitando la automatización."],
-            medium: ["Existen picos de demanda imprevistos que generan caídas en el nivel de servicio.", "Alto porcentaje de interacciones fuera de horario laboral (>30%), sugiriendo necesidad de cobertura 24/7."],
+            good: ["El volumen de interacciones se alinea con las previsiones, permitiendo una planificación de personal precisa.", "La distribución horaria es uniforme con picos predecibles. Concentración Pareto equilibrada."],
+            medium: ["Existen picos de demanda imprevistos que generan caídas en el nivel de servicio.", "Alta concentración en pocas colas (>80% en 20% de colas), riesgo de cuellos de botella."],
             bad: ["Desajuste crónico entre el forecast y el volumen real, resultando en sobrecostes o mal servicio.", "Distribución horaria muy irregular con múltiples picos impredecibles."]
         },
         kpis: [
@@ -45,85 +45,72 @@ const DIMENSIONS_CONTENT = {
             { label: "% Fuera de Horario", value: `${randomInt(15, 45)}%` },
         ],
     },
-    performance: {
+    operational_efficiency: {
         icon: Zap,
-        titles: ["Rendimiento Operativo", "Optimización de Tiempos"],
+        titles: ["Eficiencia Operativa", "Optimización de Tiempos"],
         summaries: {
-            good: ["El AHT está bien controlado con baja variabilidad (CV<30%), indicando procesos estandarizados.", "Tiempos de espera y post-llamada (ACW) mínimos, maximizando la productividad del agente."],
-            medium: ["El AHT es competitivo, pero la variabilidad es alta (CV>40%), sugiriendo inconsistencia en procesos.", "El tiempo en espera (Hold Time) es ligeramente elevado, sugiriendo posibles mejoras en el acceso a la información."],
-            bad: ["El AHT excede los benchmarks de la industria con alta variabilidad, impactando directamente en los costes.", "Tiempos de ACW prolongados indican procesos manuales ineficientes o falta de integración de sistemas."]
+            good: ["El ratio P90/P50 es bajo (<1.5), indicando tiempos consistentes y procesos estandarizados.", "Tiempos de espera, hold y ACW bien controlados, maximizando la productividad."],
+            medium: ["El ratio P90/P50 es moderado (1.5-2.0), existen casos outliers que afectan la eficiencia.", "El tiempo de hold es ligeramente elevado, sugiriendo mejoras en acceso a información."],
+            bad: ["Alto ratio P90/P50 (>2.0), indicando alta variabilidad en tiempos de gestión.", "Tiempos de ACW y hold prolongados indican procesos manuales ineficientes."]
         },
         kpis: [
-            { label: "AHT Promedio", value: `${randomInt(280, 550)}s` },
-            { label: "CV AHT", value: `${randomInt(25, 60)}%` },
+            { label: "AHT P50", value: `${randomInt(280, 450)}s` },
+            { label: "Ratio P90/P50", value: `${randomFloat(1.2, 2.5, 2)}` },
         ],
     },
-    satisfaction: {
-        icon: Smile,
-        titles: ["Satisfacción y Experiencia", "Voz del Cliente"],
-        summaries: {
-            good: ["Puntuaciones de CSAT muy positivas con distribución normal, reflejando un proceso estable y consistente.", "El análisis cualitativo muestra un sentimiento mayoritariamente positivo en las interacciones."],
-            medium: ["Los indicadores de satisfacción son neutros. La distribución de CSAT muestra cierta bimodalidad.", "Se observan comentarios mixtos, con puntos fuertes en la amabilidad del agente pero debilidades en los tiempos de respuesta."],
-            bad: ["Bajas puntuaciones de CSAT con distribución anormal, indicando un proceso inconsistente.", "Los clientes se quejan frecuentemente de largos tiempos de espera, repetición de información y falta de resolución."]
-        },
-        kpis: [
-            { label: "CSAT Promedio", value: `${randomFloat(3.8, 4.9, 1)}/5` },
-            { label: "NPS", value: `${randomInt(-20, 55)}` },
-        ],
-    },
-    economy: {
-        icon: DollarSign,
-        titles: ["Economía y Costes", "Rentabilidad del Servicio"],
-        summaries: {
-            good: ["El coste por interacción está por debajo del promedio de la industria, indicando una operación rentable.", "El ROI potencial de automatización supera los €200K anuales con payback <12 meses."],
-            medium: ["Los costes son estables pero no se observa una tendencia a la baja, sugiriendo un estancamiento en la optimización.", "El ROI potencial es moderado (€100-200K), requiriendo inversión inicial significativa."],
-            bad: ["Coste por interacción elevado, erosionando los márgenes de beneficio de la compañía.", "Bajo ROI potencial (<€100K) debido a volumen insuficiente o procesos ya optimizados."]
-        },
-        kpis: [
-            { label: "Coste por Interacción", value: `€${randomFloat(2.5, 9.5, 2)}` },
-            { label: "Ahorro Potencial", value: `€${randomInt(50, 250)}K` },
-        ],
-    },
-    efficiency: {
+    effectiveness_resolution: {
         icon: Target,
-        titles: ["Eficiencia", "Resolución y Calidad"],
+        titles: ["Efectividad & Resolución", "Calidad del Servicio"],
         summaries: {
-            good: ["Alta tasa de resolución en el primer contacto (FCR>85%), minimizando la repetición de llamadas.", "Bajo índice de transferencias y escalaciones (<10%), demostrando un correcto enrutamiento y alto conocimiento del agente."],
-            medium: ["La tasa de FCR es aceptable (70-85%), aunque se detectan ciertos tipos de consulta que requieren múltiples contactos.", "Las transferencias son moderadas (10-20%), concentradas en departamentos específicos."],
-            bad: ["Bajo FCR (<70%), lo que genera frustración en el cliente y aumenta el volumen de interacciones innecesarias.", "Excesivas transferencias y escalaciones (>20%), creando una experiencia de cliente fragmentada y costosa."]
+            good: ["FCR proxy >85%, mínima repetición de contactos a 7 días.", "Baja tasa de transferencias (<10%) y llamadas problemáticas (<5%)."],
+            medium: ["FCR proxy 70-85%, hay oportunidad de reducir recontactos.", "Tasa de transferencias moderada (10-20%), concentradas en ciertas colas."],
+            bad: ["FCR proxy <70%, alto volumen de recontactos a 7 días.", "Alta tasa de llamadas problemáticas (>15%) y transferencias excesivas."]
         },
         kpis: [
-            { label: "Tasa FCR", value: `${randomInt(65, 92)}%` },
-            { label: "Tasa de Escalación", value: `${randomInt(5, 25)}%` },
+            { label: "FCR Proxy 7d", value: `${randomInt(65, 92)}%` },
+            { label: "Tasa Transfer", value: `${randomInt(5, 25)}%` },
         ],
     },
-    benchmark: {
-        icon: Globe,
-        titles: ["Benchmark de Industria", "Contexto Competitivo"],
+    complexity_predictability: {
+        icon: Brain,
+        titles: ["Complejidad & Predictibilidad", "Análisis de Variabilidad"],
         summaries: {
-            good: ["La operación se sitúa consistentemente por encima del P75 en los KPIs más críticos.", "El rendimiento en eficiencia y calidad es de 'top quartile', representando una ventaja competitiva."],
-            medium: ["El rendimiento general está en línea con la mediana de la industria (P50), sin claras fortalezas o debilidades.", "Se observan algunas áreas por debajo del P50 que representan oportunidades de mejora claras."],
-            bad: ["La mayoría de los KPIs se encuentran por debajo del P25, indicando una necesidad urgente de mejora.", "El AHT y el CPI son significativamente más altos que los benchmarks, impactando la rentabilidad."]
+            good: ["Baja variabilidad AHT (ratio P90/P50 <1.5), proceso altamente predecible.", "Diversidad de tipificaciones controlada, bajo % de llamadas con múltiples holds."],
+            medium: ["Variabilidad AHT moderada, algunos casos outliers afectan la predictibilidad.", "% llamadas con múltiples holds elevado (15-30%), indicando complejidad."],
+            bad: ["Alta variabilidad AHT (ratio >2.0), proceso impredecible y difícil de automatizar.", "Alta diversidad de tipificaciones y % transferencias, indicando alta complejidad."]
         },
         kpis: [
-            { label: "Posición vs P50 AHT", value: `P${randomInt(30, 70)}` },
-            { label: "Posición vs P50 FCR", value: `P${randomInt(30, 70)}` },
+            { label: "Ratio P90/P50", value: `${randomFloat(1.2, 2.5, 2)}` },
+            { label: "% Transferencias", value: `${randomInt(5, 30)}%` },
+        ],
+    },
+    agentic_readiness: {
+        icon: Bot,
+        titles: ["Agentic Readiness", "Potencial de Automatización"],
+        summaries: {
+            good: ["Score 8-10: Excelente candidato para automatización completa con agentes IA.", "Alto volumen, baja variabilidad, pocas transferencias. Proceso repetitivo y predecible."],
+            medium: ["Score 5-7: Candidato para asistencia con IA (copilot) o automatización parcial.", "Volumen moderado con algunas complejidades que requieren supervisión humana."],
+            bad: ["Score 0-4: Requiere optimización previa antes de automatizar.", "Alta complejidad, baja repetitividad o variabilidad excesiva."]
+        },
+        kpis: [
+            { label: "Score Global", value: `${randomFloat(3.0, 9.5, 1)}/10` },
+            { label: "Categoría", value: randomFromList(['Automatizar', 'Asistir', 'Optimizar']) },
         ],
     },
 };
 
 const KEY_FINDINGS: Finding[] = [
     {
-        text: "El canal de voz presenta un AHT un 35% superior al del chat, pero una tasa de resolución un 15% mayor.",
-        dimensionId: 'performance',
-        type: 'info',
-        title: 'Diferencia de Canales: Voz vs Chat',
-        description: 'Análisis comparativo entre canales muestra trade-off entre velocidad y resolución.',
-        impact: 'medium'
+        text: "El ratio P90/P50 de AHT es alto (>2.0) en varias colas, indicando alta variabilidad.",
+        dimensionId: 'operational_efficiency',
+        type: 'warning',
+        title: 'Alta Variabilidad en Tiempos',
+        description: 'Procesos poco estandarizados generan tiempos impredecibles y afectan la planificación.',
+        impact: 'high'
     },
     {
-        text: "Un 22% de las transferencias desde 'Soporte Técnico N1' hacia 'Facturación' son incorrectas.",
-        dimensionId: 'efficiency',
+        text: "Un 22% de las transferencias desde 'Soporte Técnico N1' hacia otras colas son incorrectas.",
+        dimensionId: 'effectiveness_resolution',
         type: 'warning',
         title: 'Enrutamiento Incorrecto',
         description: 'Existe un problema de routing que genera ineficiencias y experiencia pobre del cliente.',
@@ -147,46 +134,46 @@ const KEY_FINDINGS: Finding[] = [
     },
     {
         text: "Las consultas sobre 'estado del pedido' representan el 30% de las interacciones y tienen alta repetitividad.",
-        dimensionId: 'volumetry_distribution',
+        dimensionId: 'agentic_readiness',
         type: 'info',
         title: 'Oportunidad de Automatización: Estado de Pedido',
-        description: 'Volumen significativo en consultas altamente repetitivas y automatizables.',
+        description: 'Volumen significativo en consultas altamente repetitivas y automatizables (Score Agentic >8).',
         impact: 'high'
     },
     {
-        text: "Baja puntuación de CSAT en interacciones relacionadas con problemas de facturación.",
-        dimensionId: 'satisfaction',
+        text: "FCR proxy <75% en colas de facturación, alto recontacto a 7 días.",
+        dimensionId: 'effectiveness_resolution',
         type: 'warning',
-        title: 'Satisfacción Baja en Facturación',
-        description: 'El equipo de facturación tiene desempeño por debajo de la media en satisfacción del cliente.',
+        title: 'Baja Resolución en Facturación',
+        description: 'El equipo de facturación tiene alto % de recontactos, indicando problemas de resolución.',
         impact: 'high'
     },
     {
-        text: "La variabilidad de AHT (CV=45%) sugiere procesos poco estandarizados.",
-        dimensionId: 'performance',
+        text: "Alta diversidad de tipificaciones y >20% llamadas con múltiples holds en colas complejas.",
+        dimensionId: 'complexity_predictability',
         type: 'warning',
-        title: 'Inconsistencia en Procesos',
-        description: 'Alta variabilidad indica falta de estandarización y diferencias significativas entre agentes.',
+        title: 'Alta Complejidad en Ciertas Colas',
+        description: 'Colas con alta complejidad requieren optimización antes de considerar automatización.',
         impact: 'medium'
     },
 ];
 
 const RECOMMENDATIONS: Recommendation[] = [
     {
-        text: "Implementar un programa de formación específico para agentes de Facturación sobre los nuevos planes.",
-        dimensionId: 'efficiency',
+        text: "Estandarizar procesos en colas con alto ratio P90/P50 para reducir variabilidad.",
+        dimensionId: 'operational_efficiency',
         priority: 'high',
-        title: 'Formación en Facturación',
-        description: 'Capacitación intensiva en productos, políticas y procedimientos de facturación.',
-        impact: 'Mejora estimada de satisfacción: 15-25%',
-        timeline: '2-3 semanas'
+        title: 'Estandarización de Procesos',
+        description: 'Implementar scripts y guías paso a paso para reducir la variabilidad en tiempos de gestión.',
+        impact: 'Reducción ratio P90/P50: 20-30%, Mejora predictibilidad',
+        timeline: '3-4 semanas'
     },
     {
         text: "Desarrollar un bot de estado de pedido para WhatsApp para desviar el 30% de las consultas.",
-        dimensionId: 'volumetry_distribution',
+        dimensionId: 'agentic_readiness',
         priority: 'high',
         title: 'Bot Automatizado de Seguimiento de Pedidos',
-        description: 'Implementar ChatBot en WhatsApp para responder consultas de estado de pedido automáticamente.',
+        description: 'Implementar ChatBot en WhatsApp para consultas con alto Agentic Score (>8).',
         impact: 'Reducción de volumen: 20-30%, Ahorro anual: €40-60K',
         timeline: '1-2 meses'
     },
@@ -200,12 +187,12 @@ const RECOMMENDATIONS: Recommendation[] = [
         timeline: '1 mes'
     },
     {
-        text: "Crear una Knowledge Base más robusta y accesible para reducir el tiempo en espera.",
-        dimensionId: 'performance',
+        text: "Crear una Knowledge Base más robusta para reducir hold time y mejorar FCR.",
+        dimensionId: 'effectiveness_resolution',
         priority: 'high',
         title: 'Mejora de Acceso a Información',
-        description: 'Desarrollar una KB centralizada integrada en el sistema de agentes con búsqueda inteligente.',
-        impact: 'Reducción de AHT: 8-12%, Mejora de FCR: 5-10%',
+        description: 'Desarrollar una KB centralizada para reducir búsquedas y mejorar resolución en primer contacto.',
+        impact: 'Reducción hold time: 15-25%, Mejora FCR: 5-10%',
         timeline: '6-8 semanas'
     },
     {
@@ -213,18 +200,18 @@ const RECOMMENDATIONS: Recommendation[] = [
         dimensionId: 'volumetry_distribution',
         priority: 'medium',
         title: 'Cobertura 24/7 con IA',
-        description: 'Desplegar agentes virtuales para gestionar el 28% de interacciones nocturnas.',
+        description: 'Desplegar agentes virtuales para gestionar interacciones nocturnas y fines de semana.',
         impact: 'Captura de demanda: 20-25%, Coste incremental: €15-20K/mes',
         timeline: '2-3 meses'
     },
     {
-        text: "Realizar un análisis de causa raíz sobre las quejas de facturación para mejorar procesos.",
-        dimensionId: 'satisfaction',
+        text: "Simplificar tipificaciones y reducir complejidad en colas problemáticas.",
+        dimensionId: 'complexity_predictability',
         priority: 'medium',
-        title: 'Análisis de Causa Raíz (Facturación)',
-        description: 'Investigar las 50 últimas quejas de facturación para identificar patrones y causas.',
-        impact: 'Identificación de mejoras de proceso con ROI potencial de €20-50K',
-        timeline: '2-3 semanas'
+        title: 'Reducción de Complejidad',
+        description: 'Consolidar tipificaciones y simplificar flujos para mejorar predictibilidad.',
+        impact: 'Reducción de complejidad: 20-30%, Mejora Agentic Score',
+        timeline: '4-6 semanas'
     },
 ];
 
@@ -651,25 +638,25 @@ const generateHeatmapData = (
     });
 };
 
-// v2.0: Añadir segmentación de cliente
+// v3.0: Oportunidades con nuevas dimensiones
 const generateOpportunityMatrixData = (): Opportunity[] => {
     const opportunities = [
-        { id: 'opp1', name: 'Automatizar consulta de pedidos', savings: 85000, dimensionId: 'volumetry_distribution', customer_segment: 'medium' as CustomerSegment },
-        { id: 'opp2', name: 'Implementar Knowledge Base dinámica', savings: 45000, dimensionId: 'performance', customer_segment: 'high' as CustomerSegment },
-        { id: 'opp3', name: 'Chatbot de triaje inicial', savings: 120000, dimensionId: 'efficiency', customer_segment: 'medium' as CustomerSegment },
-        { id: 'opp4', name: 'Análisis de sentimiento en tiempo real', savings: 30000, dimensionId: 'satisfaction', customer_segment: 'high' as CustomerSegment },
+        { id: 'opp1', name: 'Automatizar consulta de pedidos', savings: 85000, dimensionId: 'agentic_readiness', customer_segment: 'medium' as CustomerSegment },
+        { id: 'opp2', name: 'Implementar Knowledge Base dinámica', savings: 45000, dimensionId: 'operational_efficiency', customer_segment: 'high' as CustomerSegment },
+        { id: 'opp3', name: 'Chatbot de triaje inicial', savings: 120000, dimensionId: 'effectiveness_resolution', customer_segment: 'medium' as CustomerSegment },
+        { id: 'opp4', name: 'Reducir complejidad en colas críticas', savings: 30000, dimensionId: 'complexity_predictability', customer_segment: 'high' as CustomerSegment },
         { id: 'opp5', name: 'Cobertura 24/7 con agentes virtuales', savings: 65000, dimensionId: 'volumetry_distribution', customer_segment: 'low' as CustomerSegment },
     ];
     return opportunities.map(opp => ({ ...opp, impact: randomInt(3, 10), feasibility: randomInt(2, 9) }));
 };
 
-// v2.0: Añadir risk level
+// v3.0: Roadmap con nuevas dimensiones
 const generateRoadmapData = (): RoadmapInitiative[] => {
     return [
-        { id: 'r1', name: 'Chatbot de estado de pedido', phase: RoadmapPhase.Automate, timeline: 'Q1 2025', investment: 25000, resources: ['1x Bot Developer', 'API Access'], dimensionId: 'volumetry_distribution', risk: 'low' },
-        { id: 'r2', name: 'Implementar Knowledge Base dinámica', phase: RoadmapPhase.Assist, timeline: 'Q1 2025', investment: 15000, resources: ['1x PM', 'Content Team'], dimensionId: 'performance', risk: 'low' },
-        { id: 'r3', name: 'Agent Assist para sugerencias en real-time', phase: RoadmapPhase.Assist, timeline: 'Q2 2025', investment: 45000, resources: ['2x AI Devs', 'QA Team'], dimensionId: 'efficiency', risk: 'medium' },
-        { id: 'r4', name: 'IVR conversacional con IA', phase: RoadmapPhase.Automate, timeline: 'Q3 2025', investment: 60000, resources: ['AI Voice Specialist', 'UX Designer'], dimensionId: 'efficiency', risk: 'medium' },
+        { id: 'r1', name: 'Chatbot de estado de pedido', phase: RoadmapPhase.Automate, timeline: 'Q1 2025', investment: 25000, resources: ['1x Bot Developer', 'API Access'], dimensionId: 'agentic_readiness', risk: 'low' },
+        { id: 'r2', name: 'Implementar Knowledge Base dinámica', phase: RoadmapPhase.Assist, timeline: 'Q1 2025', investment: 15000, resources: ['1x PM', 'Content Team'], dimensionId: 'operational_efficiency', risk: 'low' },
+        { id: 'r3', name: 'Agent Assist para sugerencias en real-time', phase: RoadmapPhase.Assist, timeline: 'Q2 2025', investment: 45000, resources: ['2x AI Devs', 'QA Team'], dimensionId: 'effectiveness_resolution', risk: 'medium' },
+        { id: 'r4', name: 'Estandarización de procesos complejos', phase: RoadmapPhase.Augment, timeline: 'Q3 2025', investment: 30000, resources: ['Process Analyst', 'Training Team'], dimensionId: 'complexity_predictability', risk: 'medium' },
         { id: 'r5', name: 'Cobertura 24/7 con agentes virtuales', phase: RoadmapPhase.Augment, timeline: 'Q4 2025', investment: 75000, resources: ['Lead AI Engineer', 'Data Scientist'], dimensionId: 'volumetry_distribution', risk: 'high' },
     ];
 };
@@ -797,13 +784,13 @@ const generateOpportunitiesFromHeatmap = (
       Math.min(10, Math.round(feasibilityRaw))
     );
 
-    // Dimensión a la que lo vinculamos (solo decorativo de momento)
+    // Dimensión a la que lo vinculamos
     const dimensionId =
       readiness >= 70
-        ? 'volumetry_distribution'
+        ? 'agentic_readiness'
         : readiness >= 40
-        ? 'efficiency'
-        : 'economy';
+        ? 'effectiveness_resolution'
+        : 'complexity_predictability';
 
     // Segmento de cliente (high/medium/low) si lo tenemos
     const customer_segment = heat.segment;
@@ -1031,8 +1018,8 @@ const generateSyntheticAnalysis = (
     { label: "CSAT", value: `${randomFloat(4.1, 4.8, 1)}/5`, change: `-${randomFloat(0.1, 0.3, 1)}`, changeType: 'negative' },
   ];
 
-  // v2.0: Solo 6 dimensiones
-  const dimensionKeys = ['volumetry_distribution', 'performance', 'satisfaction', 'economy', 'efficiency', 'benchmark'];
+  // v3.0: 5 dimensiones viables
+  const dimensionKeys = ['volumetry_distribution', 'operational_efficiency', 'effectiveness_resolution', 'complexity_predictability', 'agentic_readiness'];
   
   const dimensions: DimensionAnalysis[] = dimensionKeys.map(key => {
       const content = DIMENSIONS_CONTENT[key as keyof typeof DIMENSIONS_CONTENT];

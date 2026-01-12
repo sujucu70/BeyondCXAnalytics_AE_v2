@@ -4,7 +4,7 @@
 
 import type { AnalysisData, Kpi, DimensionAnalysis, HeatmapDataPoint, Opportunity, RoadmapInitiative, EconomicModelData, BenchmarkDataPoint, Finding, Recommendation, TierKey, CustomerSegment, RawInteraction, AgenticReadinessResult, SubFactor, SkillMetrics } from '../types';
 import { RoadmapPhase } from '../types';
-import { BarChartHorizontal, Zap, Smile, DollarSign, Target, Globe } from 'lucide-react';
+import { BarChartHorizontal, Zap, Target, Brain, Bot } from 'lucide-react';
 import { calculateAgenticReadinessScore, type AgenticReadinessInput } from './agenticReadinessV2';
 import { classifyQueue } from './segmentClassifier';
 
@@ -287,7 +287,7 @@ function calculateHealthScore(heatmapData: HeatmapDataPoint[]): number {
 }
 
 /**
- * Generar dimensiones desde datos reales
+ * v3.0: Generar 5 dimensiones viables desde datos reales
  */
 function generateDimensionsFromRealData(
   interactions: RawInteraction[],
@@ -298,69 +298,72 @@ function generateDimensionsFromRealData(
   const totalVolume = interactions.length;
   const avgCV = metrics.reduce((sum, m) => sum + m.cv_aht, 0) / metrics.length;
   const avgTransferRate = metrics.reduce((sum, m) => sum + m.transfer_rate, 0) / metrics.length;
-  
+  const avgHoldTime = metrics.reduce((sum, m) => sum + m.hold_time_mean, 0) / metrics.length;
+
+  // Calcular ratio P90/P50 aproximado desde CV
+  const avgRatio = 1 + avgCV * 1.5; // Aproximación: ratio ≈ 1 + 1.5*CV
+
+  // Calcular Agentic Score
+  const predictability = Math.max(0, Math.min(10, 10 - ((avgCV - 0.3) / 1.2 * 10)));
+  const complexityInverse = Math.max(0, Math.min(10, 10 - (avgTransferRate / 10)));
+  const repetitivity = Math.min(10, totalVolume / 500);
+  const agenticScore = predictability * 0.30 + complexityInverse * 0.30 + repetitivity * 0.25 + 2.5;
+
   return [
+    // 1. VOLUMETRÍA & DISTRIBUCIÓN
     {
       id: 'volumetry_distribution',
       name: 'volumetry_distribution',
-      title: 'Análisis de la Demanda',
-      score: Math.min(100, Math.round((totalVolume / 200))), // Score basado en volumen
+      title: 'Volumetría & Distribución',
+      score: Math.min(100, Math.round((totalVolume / 200))),
       percentile: 65,
-      summary: `Se procesaron ${totalVolume.toLocaleString('es-ES')} interacciones distribuidas en ${metrics.length} skills diferentes.`,
+      summary: `${totalVolume.toLocaleString('es-ES')} interacciones en ${metrics.length} colas. Distribución por skill disponible en el heatmap.`,
       kpi: { label: 'Volumen Total', value: totalVolume.toLocaleString('es-ES') },
       icon: BarChartHorizontal
     },
+    // 2. EFICIENCIA OPERATIVA
     {
-      id: 'performance',
-      name: 'performance',
-      title: 'Rendimiento Operativo',
-      score: Math.round(100 - (avgCV * 100)),
+      id: 'operational_efficiency',
+      name: 'operational_efficiency',
+      title: 'Eficiencia Operativa',
+      score: Math.max(0, Math.min(100, Math.round(100 - (avgRatio - 1) * 50))),
       percentile: 70,
-      summary: avgCV < 0.4 
-        ? 'El AHT muestra baja variabilidad, indicando procesos estandarizados.'
-        : 'La variabilidad del AHT es alta, sugiriendo inconsistencia en procesos.',
-      kpi: { label: 'AHT Promedio', value: `${avgAHT}s` },
+      summary: `AHT P50: ${avgAHT}s. Ratio P90/P50 estimado: ${avgRatio.toFixed(2)}. Hold time promedio: ${Math.round(avgHoldTime)}s.`,
+      kpi: { label: 'Ratio P90/P50', value: avgRatio.toFixed(2) },
       icon: Zap
     },
+    // 3. EFECTIVIDAD & RESOLUCIÓN
     {
-      id: 'satisfaction',
-      name: 'satisfaction',
-      title: 'Voz del Cliente',
-      score: avgCsat,
-      percentile: 60,
-      summary: `CSAT promedio de ${(avgCsat / 20).toFixed(1)}/5.`,
-      kpi: { label: 'CSAT', value: `${(avgCsat / 20).toFixed(1)}/5` },
-      icon: Smile
-    },
-    {
-      id: 'economy',
-      name: 'economy',
-      title: 'Rentabilidad del Servicio',
-      score: Math.round(100 - avgTransferRate),
-      percentile: 55,
-      summary: `Tasa de transferencia del ${avgTransferRate.toFixed(1)}%.`,
-      kpi: { label: 'Transfer Rate', value: `${avgTransferRate.toFixed(1)}%` },
-      icon: DollarSign
-    },
-    {
-      id: 'efficiency',
-      name: 'efficiency',
-      title: 'Resolución y Calidad',
+      id: 'effectiveness_resolution',
+      name: 'effectiveness_resolution',
+      title: 'Efectividad & Resolución',
       score: Math.round(100 - avgTransferRate),
       percentile: 68,
-      summary: `FCR estimado del ${(100 - avgTransferRate).toFixed(1)}%.`,
-      kpi: { label: 'FCR', value: `${(100 - avgTransferRate).toFixed(1)}%` },
+      summary: `FCR proxy: ${(100 - avgTransferRate).toFixed(1)}%. Tasa de transferencias: ${avgTransferRate.toFixed(1)}%.`,
+      kpi: { label: 'FCR Proxy', value: `${(100 - avgTransferRate).toFixed(1)}%` },
       icon: Target
     },
+    // 4. COMPLEJIDAD & PREDICTIBILIDAD
     {
-      id: 'benchmark',
-      name: 'benchmark',
-      title: 'Contexto Competitivo',
-      score: 75,
+      id: 'complexity_predictability',
+      name: 'complexity_predictability',
+      title: 'Complejidad & Predictibilidad',
+      score: Math.round(100 - (avgCV * 100)),
+      percentile: 60,
+      summary: `CV AHT: ${(avgCV * 100).toFixed(1)}%. % transferencias: ${avgTransferRate.toFixed(1)}%. ${avgCV < 0.4 ? 'Proceso predecible.' : 'Alta variabilidad, considerar estandarización.'}`,
+      kpi: { label: 'CV AHT', value: `${(avgCV * 100).toFixed(1)}%` },
+      icon: Brain
+    },
+    // 5. AGENTIC READINESS
+    {
+      id: 'agentic_readiness',
+      name: 'agentic_readiness',
+      title: 'Agentic Readiness',
+      score: Math.round(agenticScore * 10),
       percentile: 65,
-      summary: 'Métricas alineadas con benchmarks de la industria.',
-      kpi: { label: 'Benchmark', value: 'P65' },
-      icon: Globe
+      summary: `Score: ${agenticScore.toFixed(1)}/10. ${agenticScore >= 8 ? 'Excelente para automatización.' : agenticScore >= 5 ? 'Candidato para asistencia IA.' : 'Requiere optimización previa.'}`,
+      kpi: { label: 'Score', value: `${agenticScore.toFixed(1)}/10` },
+      icon: Bot
     }
   ];
 }

@@ -9,7 +9,7 @@ import type {
   EconomicModelData,
 } from '../types';
 import type { BackendRawResults } from './apiClient';
-import { BarChartHorizontal, Zap, DollarSign, Smile, Target } from 'lucide-react';
+import { BarChartHorizontal, Zap, Target, Brain, Bot } from 'lucide-react';
 import type { HeatmapDataPoint, CustomerSegment } from '../types';
 
 
@@ -336,57 +336,40 @@ function buildVolumetryDimension(
   return { dimension, extraKpis };
 }
 
-// ==== Performance (operational_performance) ====
+// ==== Eficiencia Operativa (v3.0) ====
 
-function buildPerformanceDimension(
+function buildOperationalEfficiencyDimension(
   raw: BackendRawResults
 ): DimensionAnalysis | undefined {
   const op = raw?.operational_performance;
   if (!op) return undefined;
 
-  const perfScore0_10 = safeNumber(op.performance_score?.score, NaN);
-  if (!Number.isFinite(perfScore0_10)) return undefined;
-
-  const score = Math.max(
-    0,
-    Math.min(100, Math.round(perfScore0_10 * 10))
-  );
-
   const ahtP50 = safeNumber(op.aht_distribution?.p50, 0);
   const ahtP90 = safeNumber(op.aht_distribution?.p90, 0);
-  const ratio = safeNumber(op.aht_distribution?.p90_p50_ratio, 0);
-  const escRate = safeNumber(op.escalation_rate, 0);
+  const ratio = ahtP90 > 0 && ahtP50 > 0 ? ahtP90 / ahtP50 : safeNumber(op.aht_distribution?.p90_p50_ratio, 1.5);
 
-  let summary = `El AHT mediano se sitúa en ${Math.round(
-    ahtP50
-  )} segundos, con un P90 de ${Math.round(
-    ahtP90
-  )}s (ratio P90/P50 ≈ ${ratio.toFixed(
-    2
-  )}) y una tasa de escalación del ${escRate.toFixed(
-    1
-  )}%. `;
+  // Score: menor ratio = mejor score (1.0 = 100, 3.0 = 0)
+  const score = Math.max(0, Math.min(100, Math.round(100 - (ratio - 1) * 50)));
 
-  if (score >= 80) {
-    summary +=
-      'El rendimiento operativo es sólido y se encuentra claramente por encima de los umbrales objetivo.';
-  } else if (score >= 60) {
-    summary +=
-      'El rendimiento es aceptable pero existen oportunidades claras de optimización en algunos flujos.';
+  let summary = `AHT P50: ${Math.round(ahtP50)}s, P90: ${Math.round(ahtP90)}s. Ratio P90/P50: ${ratio.toFixed(2)}. `;
+
+  if (ratio < 1.5) {
+    summary += 'Tiempos consistentes y procesos estandarizados.';
+  } else if (ratio < 2.0) {
+    summary += 'Variabilidad moderada, algunos casos outliers afectan la eficiencia.';
   } else {
-    summary +=
-      'El rendimiento operativo está por debajo del nivel deseado y requiere un plan de mejora específico.';
+    summary += 'Alta variabilidad en tiempos, requiere estandarización de procesos.';
   }
 
   const kpi: Kpi = {
-    label: 'AHT mediano (P50)',
-    value: ahtP50 ? `${Math.round(ahtP50)}s` : 'N/D',
+    label: 'Ratio P90/P50',
+    value: ratio.toFixed(2),
   };
 
   const dimension: DimensionAnalysis = {
-    id: 'performance',
-    name: 'performance',
-    title: 'Rendimiento operativo',
+    id: 'operational_efficiency',
+    name: 'operational_efficiency',
+    title: 'Eficiencia Operativa',
     score,
     percentile: undefined,
     summary,
@@ -397,139 +380,177 @@ function buildPerformanceDimension(
   return dimension;
 }
 
-// ==== Satisfacción (customer_satisfaction) ====
+// ==== Efectividad & Resolución (v3.0) ====
 
-function buildSatisfactionDimension(
-  raw: BackendRawResults
-): DimensionAnalysis | undefined {
-  const cs = raw?.customer_satisfaction;
-  if (!cs) return undefined;
-
-  // CSAT global viene ya calculado en el backend (1–5)
-  const csatGlobalRaw = safeNumber(cs?.csat_global, NaN);
-  if (!Number.isFinite(csatGlobalRaw) || csatGlobalRaw <= 0) {
-    return undefined;
-  }
-
-  // Normalizamos 1–5 a 0–100
-  const csat = Math.max(1, Math.min(5, csatGlobalRaw));
-  const score = Math.max(
-    0,
-    Math.min(100, Math.round((csat / 5) * 100))
-  );
-
-  let summary = `CSAT global de ${csat.toFixed(1)}/5. `;
-
-  if (score >= 85) {
-    summary +=
-      'La satisfacción del cliente es muy alta y consistente en la mayoría de interacciones.';
-  } else if (score >= 70) {
-    summary +=
-      'La satisfacción del cliente es razonable, pero existen áreas claras de mejora en algunos journeys o motivos de contacto.';
-  } else {
-    summary +=
-      'La satisfacción del cliente se sitúa por debajo de los niveles objetivo y requiere un plan de mejora específico sobre los principales drivers de insatisfacción.';
-  }
-
-  const kpi: Kpi = {
-    label: 'CSAT global (backend)',
-    value: `${csat.toFixed(1)}/5`,
-  };
-
-  const dimension: DimensionAnalysis = {
-    id: 'satisfaction',
-    name: 'satisfaction',
-    title: 'Voz del cliente y satisfacción',
-    score,
-    percentile: undefined,
-    summary,
-    kpi,
-    icon: Smile,
-  };
-
-  return dimension;
-}
-
-// ==== Eficiencia (FCR + escalaciones + recurrencia) ====
-
-function buildEfficiencyDimension(
+function buildEffectivenessResolutionDimension(
   raw: BackendRawResults
 ): DimensionAnalysis | undefined {
   const op = raw?.operational_performance;
   if (!op) return undefined;
 
-  // FCR: viene como porcentaje 0–100, o lo aproximamos a partir de escalaciones
   const fcrPctRaw = safeNumber(op.fcr_rate, NaN);
   const escRateRaw = safeNumber(op.escalation_rate, NaN);
   const recurrenceRaw = safeNumber(op.recurrence_rate_7d, NaN);
 
-  const fcrPct = Number.isFinite(fcrPctRaw) && fcrPctRaw >= 0
+  // FCR proxy: usar fcr_rate o calcular desde recurrence
+  const fcrProxy = Number.isFinite(fcrPctRaw) && fcrPctRaw >= 0
     ? Math.max(0, Math.min(100, fcrPctRaw))
-    : Number.isFinite(escRateRaw)
-      ? Math.max(0, Math.min(100, 100 - escRateRaw))
-      : NaN;
+    : Number.isFinite(recurrenceRaw)
+      ? Math.max(0, Math.min(100, 100 - recurrenceRaw))
+      : 75; // valor por defecto
 
-  if (!Number.isFinite(fcrPct)) {
-    // Sin FCR ni escalaciones no podemos construir bien la dimensión
-    return undefined;
-  }
+  const transferRate = Number.isFinite(escRateRaw) ? escRateRaw : 15;
 
-  let score = fcrPct;
+  // Score: FCR alto + transferencias bajas = mejor score
+  const score = Math.max(0, Math.min(100, Math.round(fcrProxy - transferRate * 0.5)));
 
-  // Penalizar por escalaciones altas
-  if (Number.isFinite(escRateRaw)) {
-    const esc = escRateRaw as number;
-    if (esc > 20) score -= 20;
-    else if (esc > 10) score -= 10;
-    else if (esc > 5) score -= 5;
-  }
+  let summary = `FCR proxy 7d: ${fcrProxy.toFixed(1)}%. Tasa de transferencias: ${transferRate.toFixed(1)}%. `;
 
-  // Penalizar por recurrencia (repetición de contactos a 7 días)
-  if (Number.isFinite(recurrenceRaw)) {
-    const rec = recurrenceRaw as number; // asumimos ya en %
-    if (rec > 20) score -= 15;
-    else if (rec > 10) score -= 10;
-    else if (rec > 5) score -= 5;
-  }
-
-  score = Math.max(0, Math.min(100, Math.round(score)));
-
-  const escText = Number.isFinite(escRateRaw)
-    ? `${(escRateRaw as number).toFixed(1)}%`
-    : 'N/D';
-  const recText = Number.isFinite(recurrenceRaw)
-    ? `${(recurrenceRaw as number).toFixed(1)}%`
-    : 'N/D';
-
-  let summary = `FCR estimado de ${fcrPct.toFixed(
-    1
-  )}%, con una tasa de escalación del ${escText} y una recurrencia a 7 días de ${recText}. `;
-
-  if (score >= 80) {
-    summary +=
-      'La operación presenta una alta tasa de resolución en primer contacto y pocas escalaciones, lo que indica procesos eficientes.';
-  } else if (score >= 60) {
-    summary +=
-      'La eficiencia es razonable, aunque existen oportunidades de mejora en la resolución al primer contacto y en la reducción de contactos repetidos.';
+  if (fcrProxy >= 85 && transferRate < 10) {
+    summary += 'Excelente resolución en primer contacto, mínimas transferencias.';
+  } else if (fcrProxy >= 70) {
+    summary += 'Resolución aceptable, oportunidad de reducir recontactos y transferencias.';
   } else {
-    summary +=
-      'La eficiencia operativa es baja: hay demasiadas escalaciones o contactos repetidos, lo que impacta negativamente en costes y experiencia de cliente.';
+    summary += 'Baja resolución, alto recontacto a 7 días. Requiere mejora de procesos.';
   }
 
   const kpi: Kpi = {
-    label: 'FCR estimado (backend)',
-    value: `${fcrPct.toFixed(1)}%`,
+    label: 'FCR Proxy 7d',
+    value: `${fcrProxy.toFixed(1)}%`,
   };
 
   const dimension: DimensionAnalysis = {
-    id: 'efficiency',
-    name: 'efficiency',
-    title: 'Resolución y eficiencia',
+    id: 'effectiveness_resolution',
+    name: 'effectiveness_resolution',
+    title: 'Efectividad & Resolución',
     score,
     percentile: undefined,
     summary,
     kpi,
     icon: Target,
+  };
+
+  return dimension;
+}
+
+// ==== Complejidad & Predictibilidad (v3.0) ====
+
+function buildComplexityPredictabilityDimension(
+  raw: BackendRawResults
+): DimensionAnalysis | undefined {
+  const op = raw?.operational_performance;
+  if (!op) return undefined;
+
+  const ahtP50 = safeNumber(op.aht_distribution?.p50, 0);
+  const ahtP90 = safeNumber(op.aht_distribution?.p90, 0);
+  const ratio = ahtP50 > 0 ? ahtP90 / ahtP50 : 2;
+  const escalationRate = safeNumber(op.escalation_rate, 15);
+
+  // Score: menor ratio + menos escalaciones = mayor score (más predecible)
+  const ratioScore = Math.max(0, Math.min(50, 50 - (ratio - 1) * 25));
+  const escalationScore = Math.max(0, Math.min(50, 50 - escalationRate));
+  const score = Math.round(ratioScore + escalationScore);
+
+  let summary = `Variabilidad AHT (ratio P90/P50): ${ratio.toFixed(2)}. % transferencias: ${escalationRate.toFixed(1)}%. `;
+
+  if (ratio < 1.5 && escalationRate < 10) {
+    summary += 'Proceso altamente predecible y baja complejidad. Excelente candidato para automatización.';
+  } else if (ratio < 2.0) {
+    summary += 'Complejidad moderada, algunos casos requieren atención especial.';
+  } else {
+    summary += 'Alta complejidad y variabilidad. Requiere optimización antes de automatizar.';
+  }
+
+  const kpi: Kpi = {
+    label: 'Ratio P90/P50',
+    value: ratio.toFixed(2),
+  };
+
+  const dimension: DimensionAnalysis = {
+    id: 'complexity_predictability',
+    name: 'complexity_predictability',
+    title: 'Complejidad & Predictibilidad',
+    score,
+    percentile: undefined,
+    summary,
+    kpi,
+    icon: Brain,
+  };
+
+  return dimension;
+}
+
+// ==== Agentic Readiness como dimensión (v3.0) ====
+
+function buildAgenticReadinessDimension(
+  raw: BackendRawResults,
+  fallbackTier: TierKey
+): DimensionAnalysis | undefined {
+  const ar = raw?.agentic_readiness?.agentic_readiness;
+
+  // Si no hay datos de backend, calculamos un score aproximado
+  const op = raw?.operational_performance;
+  const volumetry = raw?.volumetry;
+
+  let score0_10: number;
+  let category: string;
+
+  if (ar) {
+    score0_10 = safeNumber(ar.final_score, 5);
+  } else {
+    // Calcular aproximado desde métricas disponibles
+    const ahtP50 = safeNumber(op?.aht_distribution?.p50, 0);
+    const ahtP90 = safeNumber(op?.aht_distribution?.p90, 0);
+    const ratio = ahtP50 > 0 ? ahtP90 / ahtP50 : 2;
+    const escalation = safeNumber(op?.escalation_rate, 15);
+
+    const skillVolumes = Array.isArray(volumetry?.volume_by_skill?.values)
+      ? volumetry.volume_by_skill.values.map((v: any) => safeNumber(v, 0))
+      : [];
+    const totalVolume = skillVolumes.reduce((a: number, b: number) => a + b, 0);
+
+    // Calcular sub-scores
+    const predictability = Math.max(0, Math.min(10, 10 - (ratio - 1) * 5));
+    const complexityInverse = Math.max(0, Math.min(10, 10 - escalation / 5));
+    const repetitivity = Math.min(10, totalVolume / 500);
+
+    score0_10 = predictability * 0.30 + complexityInverse * 0.30 + repetitivity * 0.25 + 2.5; // base offset
+  }
+
+  const score0_100 = Math.max(0, Math.min(100, Math.round(score0_10 * 10)));
+
+  if (score0_10 >= 8) {
+    category = 'Automatizar';
+  } else if (score0_10 >= 5) {
+    category = 'Asistir (Copilot)';
+  } else {
+    category = 'Optimizar primero';
+  }
+
+  let summary = `Score global: ${score0_10.toFixed(1)}/10. Categoría: ${category}. `;
+
+  if (score0_10 >= 8) {
+    summary += 'Excelente candidato para automatización completa con agentes IA.';
+  } else if (score0_10 >= 5) {
+    summary += 'Candidato para asistencia con IA (copilot) o automatización parcial.';
+  } else {
+    summary += 'Requiere optimización de procesos antes de automatizar.';
+  }
+
+  const kpi: Kpi = {
+    label: 'Score Global',
+    value: `${score0_10.toFixed(1)}/10`,
+  };
+
+  const dimension: DimensionAnalysis = {
+    id: 'agentic_readiness',
+    name: 'agentic_readiness',
+    title: 'Agentic Readiness',
+    score: score0_100,
+    percentile: undefined,
+    summary,
+    kpi,
+    icon: Bot,
   };
 
   return dimension;
@@ -627,58 +648,7 @@ function buildEconomicModel(raw: BackendRawResults): EconomicModelData {
   };
 }
 
-function buildEconomyDimension(
-  raw: BackendRawResults
-): DimensionAnalysis | undefined {
-  const econ = raw?.economy_costs;
-  if (!econ) return undefined;
-
-  const cost = econ.cost_breakdown || {};
-  const totalAnnual = safeNumber(cost.total_annual, 0);
-  const potential = econ.potential_savings || {};
-  const annualSavings = safeNumber(potential.annual_savings, 0);
-
-  if (!totalAnnual && !annualSavings) return undefined;
-
-  const savingsPct = totalAnnual
-    ? (annualSavings / totalAnnual) * 100
-    : 0;
-
-  let summary = `El coste anual estimado de la operación es de aproximadamente €${totalAnnual.toFixed(
-    2
-  )}. `;
-  if (annualSavings > 0) {
-    summary += `El ahorro potencial anual asociado a la estrategia agentic se sitúa en torno a €${annualSavings.toFixed(
-      2
-    )}, equivalente a ~${savingsPct.toFixed(1)}% del coste actual.`;
-  } else {
-    summary +=
-      'Todavía no se dispone de una estimación robusta de ahorro potencial.';
-  }
-
-  const score =
-    totalAnnual && annualSavings
-      ? Math.max(0, Math.min(100, Math.round(savingsPct)))
-      : 50;
-
-  const dimension: DimensionAnalysis = {
-    id: 'economy',
-    name: 'economy',
-    title: 'Economía y costes',
-    score,
-    percentile: undefined,
-    summary,
-    kpi: {
-      label: 'Coste anual actual',
-      value: totalAnnual
-        ? `€${totalAnnual.toFixed(0)}`
-        : 'N/D',
-    },
-    icon: DollarSign,
-  };
-
-  return dimension;
-}
+// buildEconomyDimension eliminado en v3.0 - economía integrada en otras dimensiones y modelo económico
 
 /**
  * Transforma el JSON del backend (results) al AnalysisData
@@ -722,20 +692,20 @@ export function mapBackendResultsToAnalysisData(
     Math.min(100, Math.round(arScore * 10))
   );
 
-  // Dimensiones
+  // v3.0: 5 dimensiones viables
   const { dimension: volumetryDimension, extraKpis } =
     buildVolumetryDimension(raw);
-  const performanceDimension = buildPerformanceDimension(raw);
-  const satisfactionDimension = buildSatisfactionDimension(raw);
-  const economyDimension = buildEconomyDimension(raw);
-  const efficiencyDimension = buildEfficiencyDimension(raw);
+  const operationalEfficiencyDimension = buildOperationalEfficiencyDimension(raw);
+  const effectivenessResolutionDimension = buildEffectivenessResolutionDimension(raw);
+  const complexityPredictabilityDimension = buildComplexityPredictabilityDimension(raw);
+  const agenticReadinessDimension = buildAgenticReadinessDimension(raw, tierFromFrontend || 'silver');
 
   const dimensions: DimensionAnalysis[] = [];
   if (volumetryDimension) dimensions.push(volumetryDimension);
-  if (performanceDimension) dimensions.push(performanceDimension);
-  if (satisfactionDimension) dimensions.push(satisfactionDimension);
-  if (economyDimension) dimensions.push(economyDimension);
-  if (efficiencyDimension) dimensions.push(efficiencyDimension);
+  if (operationalEfficiencyDimension) dimensions.push(operationalEfficiencyDimension);
+  if (effectivenessResolutionDimension) dimensions.push(effectivenessResolutionDimension);
+  if (complexityPredictabilityDimension) dimensions.push(complexityPredictabilityDimension);
+  if (agenticReadinessDimension) dimensions.push(agenticReadinessDimension);
 
 
   const op = raw?.operational_performance;

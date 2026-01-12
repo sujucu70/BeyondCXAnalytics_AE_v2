@@ -7,8 +7,8 @@ services:
     container_name: beyond-backend
     environment:
       # credenciales del API (las mismas que usas ahora)
-      BASIC_AUTH_USERNAME: admin
-      BASIC_AUTH_PASSWORD: admin
+      BASIC_AUTH_USERNAME: "beyond"
+      BASIC_AUTH_PASSWORD: "beyond2026"
     expose:
       - "8000"
     networks:
@@ -34,7 +34,9 @@ services:
       - frontend
     ports:
       - "80:80"
+      - "443:443"
     volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
     networks:
       - beyond-net
