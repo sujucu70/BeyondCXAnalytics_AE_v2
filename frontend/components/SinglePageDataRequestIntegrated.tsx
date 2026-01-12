@@ -1,29 +1,31 @@
 // components/SinglePageDataRequestIntegrated.tsx
-// Versión integrada con DataInputRedesigned + Dashboard actual
+// Versión simplificada con cabecera estilo dashboard
 
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
 import { TierKey, AnalysisData } from '../types';
-import TierSelectorEnhanced from './TierSelectorEnhanced';
 import DataInputRedesigned from './DataInputRedesigned';
 import DashboardTabs from './DashboardTabs';
 import { generateAnalysis } from '../utils/analysisGenerator';
 import toast from 'react-hot-toast';
 import { useAuth } from '../utils/AuthContext';
 
+// Función para formatear fecha como en el dashboard
+const formatDate = (): string => {
+  const now = new Date();
+  const months = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
+  return `${months[now.getMonth()]} ${now.getFullYear()}`;
+};
+
 const SinglePageDataRequestIntegrated: React.FC = () => {
-  const [selectedTier, setSelectedTier] = useState<TierKey>('silver');
   const [view, setView] = useState<'form' | 'dashboard'>('form');
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const handleTierSelect = (tier: TierKey) => {
-    setSelectedTier(tier);
-  };
-
   const { authHeader, logout } = useAuth();
-  
 
   const handleAnalyze = (config: {
     costPerHour: number;
@@ -37,52 +39,50 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
     sheetUrl?: string;
     useSynthetic?: boolean;
   }) => {
-    console.log('🚀 handleAnalyze called with config:', config);
-    console.log('🎯 Selected tier:', selectedTier);
-    console.log('📄 File:', config.file);
-    console.log('🔗 Sheet URL:', config.sheetUrl);
-    console.log('✨ Use Synthetic:', config.useSynthetic);
-    
-    // Validar que hay datos
-    if (!config.file && !config.sheetUrl && !config.useSynthetic) {
-      toast.error('Por favor, sube un archivo, introduce una URL o genera datos sintéticos.');
+    // Validar que hay archivo
+    if (!config.file) {
+      toast.error('Por favor, sube un archivo CSV o Excel.');
       return;
     }
-  
-    // 🔐 Si usamos CSV real, exigir estar logado
-    if (config.file && !config.useSynthetic && !authHeader) {
-      toast.error('Debes iniciar sesión para analizar datos reales.');
+
+    // Validar coste por hora
+    if (!config.costPerHour || config.costPerHour <= 0) {
+      toast.error('Por favor, introduce el coste por hora del agente.');
       return;
     }
-    
+
+    // Exigir estar logado para analizar
+    if (!authHeader) {
+      toast.error('Debes iniciar sesión para analizar datos.');
+      return;
+    }
+
     setIsAnalyzing(true);
     toast.loading('Generando análisis...', { id: 'analyzing' });
-    
+
     setTimeout(async () => {
-      console.log('⏰ Generating analysis...');
       try {
+        // Usar tier 'gold' por defecto
         const data = await generateAnalysis(
-          selectedTier, 
-          config.costPerHour, 
-          config.avgCsat, 
+          'gold' as TierKey,
+          config.costPerHour,
+          config.avgCsat || 0,
           config.segmentMapping,
           config.file,
           config.sheetUrl,
-          config.useSynthetic,
+          false, // No usar sintético
           authHeader || undefined
         );
-        console.log('✅ Analysis generated successfully');
-        
+
         setAnalysisData(data);
         setIsAnalyzing(false);
         toast.dismiss('analyzing');
         toast.success('¡Análisis completado!', { icon: '🎉' });
         setView('dashboard');
-        
-        // Scroll to top
+
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } catch (error) {
-        console.error('❌ Error generating analysis:', error);
+        console.error('Error generating analysis:', error);
         setIsAnalyzing(false);
         toast.dismiss('analyzing');
 
@@ -106,14 +106,10 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
 
   // Dashboard view
   if (view === 'dashboard' && analysisData) {
-    console.log('📊 Rendering dashboard with data:', analysisData);
-    console.log('📊 Heatmap data length:', analysisData.heatmapData?.length);
-    console.log('📊 Dimensions length:', analysisData.dimensions?.length);
-    
     try {
       return <DashboardTabs data={analysisData} onBack={handleBackToForm} />;
     } catch (error) {
-      console.error('❌ Error rendering dashboard:', error);
+      console.error('Error rendering dashboard:', error);
       return (
         <div className="min-h-screen bg-red-50 p-8">
           <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-lg p-6">
@@ -135,57 +131,35 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
   return (
     <>
       <Toaster position="top-right" />
-      
-      <div className="w-full min-h-screen bg-gradient-to-br from-slate-50 via-[#E8EBFA] to-slate-100 font-sans">
-        <div className="w-full max-w-7xl mx-auto p-6 space-y-8">
-          {/* Header */}
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center"
-          >
-            <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-3">
-              Beyond Diagnostic
-            </h1>
-            <p className="text-lg text-slate-600">
-              Análisis de Readiness Agéntico para Contact Centers
-            </p>
-            <button
-              onClick={logout}
-              className="text-xs text-slate-500 hover:text-slate-800 underline mt-1"
-            >
-              Cerrar sesión
-            </button>
-          </motion.div>
 
-          {/* Tier Selection */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white rounded-xl shadow-lg p-8"
-          >
-            <div className="mb-8">
-              <h2 className="text-3xl font-bold text-slate-900 mb-2">
-                Selecciona tu Tier de Análisis
-              </h2>
-              <p className="text-slate-600">
-                Elige el nivel de profundidad que necesitas para tu diagnóstico
-              </p>
+      <div className="min-h-screen bg-slate-50">
+        {/* Header estilo dashboard */}
+        <header className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-xl font-bold text-slate-800">
+                AIR EUROPA - Beyond CX Analytics
+              </h1>
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-slate-500">{formatDate()}</span>
+                <button
+                  onClick={logout}
+                  className="text-xs text-slate-500 hover:text-slate-800 underline"
+                >
+                  Cerrar sesión
+                </button>
+              </div>
             </div>
+          </div>
+        </header>
 
-            <TierSelectorEnhanced
-              selectedTier={selectedTier}
-              onSelectTier={handleTierSelect}
-            />
-          </motion.div>
-
-          {/* Data Input - Using redesigned component */}
+        {/* Contenido principal */}
+        <main className="max-w-7xl mx-auto px-6 py-6">
           <DataInputRedesigned
             onAnalyze={handleAnalyze}
             isAnalyzing={isAnalyzing}
           />
-        </div>
+        </main>
       </div>
     </>
   );
