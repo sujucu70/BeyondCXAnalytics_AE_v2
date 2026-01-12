@@ -1008,11 +1008,12 @@ export function buildHeatmapFromBackend(
         )
       : 0;
 
+    // Transfer rate es el % real de transferencias (NO el complemento)
     const transferMetric = Math.max(
       0,
       Math.min(
         100,
-        Math.round(100 - transfer_rate)
+        Math.round(transfer_rate)
       )
     );
 

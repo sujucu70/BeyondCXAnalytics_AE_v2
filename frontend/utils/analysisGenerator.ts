@@ -617,7 +617,7 @@ const generateHeatmapData = (
                 aht: isNaN(aht_mean) ? 0 : Math.max(0, Math.min(100, Math.round(100 - ((aht_mean - 240) / 310) * 100))),
                 csat: isNaN(avgCsat) ? 0 : Math.max(0, Math.min(100, Math.round(avgCsat))),
                 hold_time: isNaN(avg_hold_time) ? 0 : Math.max(0, Math.min(100, Math.round(100 - (avg_hold_time / 120) * 100))),
-                transfer_rate: isNaN(transfer_rate) ? 0 : Math.max(0, Math.min(100, Math.round(100 - (transfer_rate * 100))))
+                transfer_rate: isNaN(transfer_rate) ? 0 : Math.max(0, Math.min(100, Math.round(transfer_rate * 100)))
             },
             annual_cost,
             variability: {

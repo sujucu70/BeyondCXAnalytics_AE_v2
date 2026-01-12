@@ -224,12 +224,14 @@ function generateHeatmapFromMetrics(
       : 'medium' as CustomerSegment;
     
     // Scores de performance (normalizados 0-100)
+    // FCR = 100 - transfer_rate (si no hay transferencia, hay resolución en primer contacto)
     const fcr_score = Math.round(100 - m.transfer_rate);
     const aht_score = Math.round(Math.max(0, Math.min(100, 100 - ((m.aht_mean - 240) / 310) * 100)));
     const csat_score = avgCsat;
     const hold_time_score = Math.round(Math.max(0, Math.min(100, 100 - (m.hold_time_mean / 60) * 10)));
-    const transfer_rate_score = Math.round(100 - m.transfer_rate);
-    
+    // Transfer rate es el % real de transferencias (NO el complemento)
+    const actual_transfer_rate = Math.round(m.transfer_rate);
+
     return {
       skill: m.skill,
       volume: m.volume,
@@ -239,7 +241,7 @@ function generateHeatmapFromMetrics(
         aht: aht_score,
         csat: csat_score,
         hold_time: hold_time_score,
-        transfer_rate: transfer_rate_score
+        transfer_rate: actual_transfer_rate
       },
       automation_readiness: Math.round(agentic_readiness * 10),
       variability: {
