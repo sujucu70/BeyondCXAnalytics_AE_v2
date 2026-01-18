@@ -6,19 +6,10 @@ import { Toaster } from 'react-hot-toast';
 import { TierKey, AnalysisData } from '../types';
 import DataInputRedesigned from './DataInputRedesigned';
 import DashboardTabs from './DashboardTabs';
-import { generateAnalysis } from '../utils/analysisGenerator';
+import { generateAnalysis, generateAnalysisFromCache } from '../utils/analysisGenerator';
 import toast from 'react-hot-toast';
 import { useAuth } from '../utils/AuthContext';
-
-// Función para formatear fecha como en el dashboard
-const formatDate = (): string => {
-  const now = new Date();
-  const months = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-  ];
-  return `${months[now.getMonth()]} ${now.getFullYear()}`;
-};
+import { formatDateMonthYear } from '../utils/formatters';
 
 const SinglePageDataRequestIntegrated: React.FC = () => {
   const [view, setView] = useState<'form' | 'dashboard'>('form');
@@ -38,9 +29,10 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
     file?: File;
     sheetUrl?: string;
     useSynthetic?: boolean;
+    useCache?: boolean;
   }) => {
-    // Validar que hay archivo
-    if (!config.file) {
+    // Validar que hay archivo o caché
+    if (!config.file && !config.useCache) {
       toast.error('Por favor, sube un archivo CSV o Excel.');
       return;
     }
@@ -58,26 +50,40 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
     }
 
     setIsAnalyzing(true);
-    toast.loading('Generando análisis...', { id: 'analyzing' });
+    const loadingMsg = config.useCache ? 'Cargando desde caché...' : 'Generando análisis...';
+    toast.loading(loadingMsg, { id: 'analyzing' });
 
     setTimeout(async () => {
       try {
-        // Usar tier 'gold' por defecto
-        const data = await generateAnalysis(
-          'gold' as TierKey,
-          config.costPerHour,
-          config.avgCsat || 0,
-          config.segmentMapping,
-          config.file,
-          config.sheetUrl,
-          false, // No usar sintético
-          authHeader || undefined
-        );
+        let data: AnalysisData;
+
+        if (config.useCache) {
+          // Usar datos desde caché
+          data = await generateAnalysisFromCache(
+            'gold' as TierKey,
+            config.costPerHour,
+            config.avgCsat || 0,
+            config.segmentMapping,
+            authHeader || undefined
+          );
+        } else {
+          // Usar tier 'gold' por defecto
+          data = await generateAnalysis(
+            'gold' as TierKey,
+            config.costPerHour,
+            config.avgCsat || 0,
+            config.segmentMapping,
+            config.file,
+            config.sheetUrl,
+            false, // No usar sintético
+            authHeader || undefined
+          );
+        }
 
         setAnalysisData(data);
         setIsAnalyzing(false);
         toast.dismiss('analyzing');
-        toast.success('¡Análisis completado!', { icon: '🎉' });
+        toast.success(config.useCache ? '¡Datos cargados desde caché!' : '¡Análisis completado!', { icon: '🎉' });
         setView('dashboard');
 
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -95,7 +101,7 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
           toast.error('Error al generar el análisis: ' + msg);
         }
       }
-    }, 1500);
+    }, 500);
   };
 
   const handleBackToForm = () => {
@@ -141,7 +147,7 @@ const SinglePageDataRequestIntegrated: React.FC = () => {
                 AIR EUROPA - Beyond CX Analytics
               </h1>
               <div className="flex items-center gap-4">
-                <span className="text-sm text-slate-500">{formatDate()}</span>
+                <span className="text-sm text-slate-500">{formatDateMonthYear()}</span>
                 <button
                   onClick={logout}
                   className="text-xs text-slate-500 hover:text-slate-800 underline"

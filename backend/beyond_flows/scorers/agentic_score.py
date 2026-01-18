@@ -506,11 +506,10 @@ def score_roi(annual_savings: Any) -> Dict[str, Any]:
 
 def classify_agentic_score(score: Optional[float]) -> Dict[str, Any]:
     """
-    Clasificación final:
-      - 8–10: AUTOMATE 🤖
-      - 5–7.99: ASSIST 🤝
-      - 3–4.99: AUGMENT 🧠
-      - 0–2.99: HUMAN_ONLY 👤
+    Clasificación final (alineada con frontend):
+      - ≥6: COPILOT 🤖 (Listo para Copilot)
+      - 4–5.99: OPTIMIZE 🔧 (Optimizar Primero)
+      - <4: HUMAN 👤 (Requiere Gestión Humana)
 
     Si score es None (ninguna dimensión disponible), devuelve NO_DATA.
     """
@@ -524,33 +523,26 @@ def classify_agentic_score(score: Optional[float]) -> Dict[str, Any]:
             ),
         }
 
-    if score >= 8.0:
-        label = "AUTOMATE"
+    if score >= 6.0:
+        label = "COPILOT"
         emoji = "🤖"
         description = (
-            "Alta repetitividad, alta predictibilidad y ROI elevado. "
-            "Candidato a automatización completa (chatbot/IVR inteligente)."
+            "Listo para Copilot. Procesos con predictibilidad y simplicidad "
+            "suficientes para asistencia IA (sugerencias en tiempo real, autocompletado)."
         )
-    elif score >= 5.0:
-        label = "ASSIST"
-        emoji = "🤝"
+    elif score >= 4.0:
+        label = "OPTIMIZE"
+        emoji = "🔧"
         description = (
-            "Complejidad media o ROI limitado. Recomendado enfoque de copilot "
-            "para agentes (sugerencias en tiempo real, autocompletado, etc.)."
-        )
-    elif score >= 3.0:
-        label = "AUGMENT"
-        emoji = "🧠"
-        description = (
-            "Alta complejidad o bajo volumen. Mejor usar herramientas de apoyo "
-            "(knowledge base, guías dinámicas, scripts)."
+            "Optimizar primero. Estandarizar procesos y reducir variabilidad "
+            "antes de implementar asistencia IA."
         )
     else:
-        label = "HUMAN_ONLY"
+        label = "HUMAN"
         emoji = "👤"
         description = (
-            "Procesos de muy bajo volumen o extremadamente complejos. Mejor "
-            "mantener operación 100% humana de momento."
+            "Requiere gestión humana. Procesos complejos o variables que "
+            "necesitan intervención humana antes de considerar automatización."
         )
 
     return {

@@ -107,11 +107,11 @@ export function WaterfallChart({
     return null;
   };
 
-  // Find min/max for Y axis
+  // Find min/max for Y axis - always start from 0
   const allValues = processedData.flatMap(d => [d.start, d.end]);
-  const minValue = Math.min(0, ...allValues);
+  const minValue = 0; // Always start from 0, not negative
   const maxValue = Math.max(...allValues);
-  const padding = (maxValue - minValue) * 0.1;
+  const padding = maxValue * 0.1;
 
   return (
     <div className="bg-white rounded-lg p-4 border border-slate-200">

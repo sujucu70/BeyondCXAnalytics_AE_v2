@@ -86,6 +86,16 @@ class OperationalPerformanceMetrics:
             + df["wrap_up_time"].fillna(0)
         )
 
+        # v3.0: Filtrar NOISE y ZOMBIE para cálculos de variabilidad
+        # record_status: 'valid', 'noise', 'zombie', 'abandon'
+        # Para AHT/CV solo usamos 'valid' (o sin status = legacy data)
+        if "record_status" in df.columns:
+            df["record_status"] = df["record_status"].astype(str).str.strip().str.upper()
+            # Crear máscara para registros válidos (para cálculos de CV/variabilidad)
+            df["_is_valid_for_cv"] = df["record_status"].isin(["VALID", "NAN", ""])  | df["record_status"].isna()
+        else:
+            df["_is_valid_for_cv"] = True
+
         # Normalización básica
         df["queue_skill"] = df["queue_skill"].astype(str).str.strip()
         df["channel"] = df["channel"].astype(str).str.strip()
@@ -121,8 +131,13 @@ class OperationalPerformanceMetrics:
     def aht_distribution(self) -> Dict[str, float]:
         """
         Devuelve P10, P50, P90 del AHT y el ratio P90/P50 como medida de variabilidad.
+
+        v3.0: Filtra NOISE y ZOMBIE para el cálculo de variabilidad.
+        Solo usa registros con record_status='valid' o sin status (legacy).
         """
-        ht = self.df["handle_time"].dropna().astype(float)
+        # Filtrar solo registros válidos para cálculo de variabilidad
+        df_valid = self.df[self.df["_is_valid_for_cv"] == True]
+        ht = df_valid["handle_time"].dropna().astype(float)
         if ht.empty:
             return {}
 
@@ -165,56 +180,45 @@ class OperationalPerformanceMetrics:
     # ------------------------------------------------------------------ #
     def fcr_rate(self) -> float:
         """
-        FCR proxy = 100 - escalation_rate.
+        FCR (First Contact Resolution).
 
-        Usamos la métrica de escalación ya calculada a partir de transfer_flag.
-        Si no se puede calcular escalation_rate, intentamos derivarlo
-        directamente de la columna transfer_flag. Si todo falla, devolvemos NaN.
+        Prioridad 1: Usar fcr_real_flag del CSV si existe
+        Prioridad 2: Calcular como 100 - escalation_rate
         """
+        df = self.df
+        total = len(df)
+        if total == 0:
+            return float("nan")
+
+        # Prioridad 1: Usar fcr_real_flag si existe
+        if "fcr_real_flag" in df.columns:
+            col = df["fcr_real_flag"]
+            # Normalizar a booleano
+            if col.dtype == "O":
+                fcr_mask = (
+                    col.astype(str)
+                       .str.strip()
+                       .str.lower()
+                       .isin(["true", "t", "1", "yes", "y", "si", "sí"])
+                )
+            else:
+                fcr_mask = pd.to_numeric(col, errors="coerce").fillna(0) > 0
+
+            fcr_count = int(fcr_mask.sum())
+            fcr = (fcr_count / total) * 100.0
+            return float(max(0.0, min(100.0, round(fcr, 2))))
+
+        # Prioridad 2: Fallback a 100 - escalation_rate
         try:
             esc = self.escalation_rate()
         except Exception:
             esc = float("nan")
 
-        # Si escalation_rate es válido, usamos el proxy simple
         if esc is not None and not math.isnan(esc):
             fcr = 100.0 - esc
             return float(max(0.0, min(100.0, round(fcr, 2))))
 
-        # Fallback: calcular directamente desde transfer_flag
-        df = self.df
-        if "transfer_flag" not in df.columns or len(df) == 0:
-            return float("nan")
-
-        col = df["transfer_flag"]
-
-        # Normalizar a booleano: TRUE/FALSE, 1/0, etc.
-        if col.dtype == "O":
-            col_norm = (
-                col.astype(str)
-                   .str.strip()
-                   .str.lower()
-                   .map({
-                       "true": True,
-                       "t": True,
-                       "1": True,
-                       "yes": True,
-                       "y": True,
-                   })
-            ).fillna(False)
-            transfer_mask = col_norm
-        else:
-            transfer_mask = pd.to_numeric(col, errors="coerce").fillna(0) > 0
-
-        total = len(df)
-        transfers = int(transfer_mask.sum())
-
-        esc_rate = transfers / total if total > 0 else float("nan")
-        if math.isnan(esc_rate):
-            return float("nan")
-
-        fcr = 100.0 - esc_rate * 100.0
-        return float(max(0.0, min(100.0, round(fcr, 2))))
+        return float("nan")
 
 
     def escalation_rate(self) -> float:
@@ -233,19 +237,56 @@ class OperationalPerformanceMetrics:
         """
         % de interacciones abandonadas.
 
-        Definido como % de filas con abandoned_flag == True.
-        Si la columna no existe, devuelve NaN.
+        Busca en orden: is_abandoned, abandoned_flag, abandoned
+        Si ninguna columna existe, devuelve NaN.
         """
         df = self.df
-        if "abandoned_flag" not in df.columns:
-            return float("nan")
-
         total = len(df)
         if total == 0:
             return float("nan")
 
-        abandoned = df["abandoned_flag"].sum()
+        # Buscar columna de abandono en orden de prioridad
+        abandon_col = None
+        for col_name in ["is_abandoned", "abandoned_flag", "abandoned"]:
+            if col_name in df.columns:
+                abandon_col = col_name
+                break
+
+        if abandon_col is None:
+            return float("nan")
+
+        col = df[abandon_col]
+
+        # Normalizar a booleano
+        if col.dtype == "O":
+            abandon_mask = (
+                col.astype(str)
+                   .str.strip()
+                   .str.lower()
+                   .isin(["true", "t", "1", "yes", "y", "si", "sí"])
+            )
+        else:
+            abandon_mask = pd.to_numeric(col, errors="coerce").fillna(0) > 0
+
+        abandoned = int(abandon_mask.sum())
         return float(round(abandoned / total * 100, 2))
+
+    def high_hold_time_rate(self, threshold_seconds: float = 60.0) -> float:
+        """
+        % de interacciones con hold_time > threshold (por defecto 60s).
+
+        Proxy de complejidad: si el agente tuvo que poner en espera al cliente
+        más de 60 segundos, probablemente tuvo que consultar/investigar.
+        """
+        df = self.df
+        total = len(df)
+        if total == 0:
+            return float("nan")
+
+        hold_times = df["hold_time"].fillna(0)
+        high_hold_count = (hold_times > threshold_seconds).sum()
+
+        return float(round(high_hold_count / total * 100, 2))
 
     def recurrence_rate_7d(self) -> float:
         """

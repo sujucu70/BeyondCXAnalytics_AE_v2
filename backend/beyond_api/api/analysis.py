@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import json
 import math
@@ -11,6 +12,10 @@ from fastapi.responses import JSONResponse
 
 from beyond_api.security import get_current_user
 from beyond_api.services.analysis_service import run_analysis_collect_json
+
+# Cache paths - same as in cache.py
+CACHE_DIR = Path(os.getenv("CACHE_DIR", "/data/cache"))
+CACHED_FILE = CACHE_DIR / "cached_data.csv"
 
 router = APIRouter(
     prefix="",
@@ -115,5 +120,102 @@ async def analysis_endpoint(
         content={
             "user": current_user,
             "results": safe_results,
+        }
+    )
+
+
+def extract_date_range_from_csv(file_path: Path) -> dict:
+    """Extrae el rango de fechas del CSV."""
+    import pandas as pd
+    try:
+        # Leer solo la columna de fecha para eficiencia
+        df = pd.read_csv(file_path, usecols=['datetime_start'], parse_dates=['datetime_start'])
+        if 'datetime_start' in df.columns and len(df) > 0:
+            min_date = df['datetime_start'].min()
+            max_date = df['datetime_start'].max()
+            return {
+                "min": min_date.strftime('%Y-%m-%d') if pd.notna(min_date) else None,
+                "max": max_date.strftime('%Y-%m-%d') if pd.notna(max_date) else None,
+            }
+    except Exception as e:
+        print(f"Error extracting date range: {e}")
+    return {"min": None, "max": None}
+
+
+def count_unique_queues_from_csv(file_path: Path) -> int:
+    """Cuenta las colas únicas en el CSV."""
+    import pandas as pd
+    try:
+        df = pd.read_csv(file_path, usecols=['queue_skill'])
+        if 'queue_skill' in df.columns:
+            return df['queue_skill'].nunique()
+    except Exception as e:
+        print(f"Error counting queues: {e}")
+    return 0
+
+
+@router.post("/analysis/cached")
+async def analysis_cached_endpoint(
+    economy_json: Optional[str] = Form(default=None),
+    analysis: Literal["basic", "premium"] = Form(default="premium"),
+    current_user: str = Depends(get_current_user),
+):
+    """
+    Ejecuta el pipeline sobre el archivo CSV cacheado en el servidor.
+    Útil para re-analizar sin tener que subir el archivo de nuevo.
+    """
+    # Validar que existe el archivo cacheado
+    if not CACHED_FILE.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No hay archivo cacheado en el servidor. Sube un archivo primero.",
+        )
+
+    # Validar `analysis`
+    if analysis not in {"basic", "premium"}:
+        raise HTTPException(
+            status_code=400,
+            detail="analysis debe ser 'basic' o 'premium'.",
+        )
+
+    # Parseo de economía (si viene)
+    economy_data = None
+    if economy_json:
+        try:
+            economy_data = json.loads(economy_json)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=400,
+                detail="economy_json no es un JSON válido.",
+            )
+
+    # Extraer metadatos del CSV
+    date_range = extract_date_range_from_csv(CACHED_FILE)
+    unique_queues = count_unique_queues_from_csv(CACHED_FILE)
+
+    try:
+        # Ejecutar el análisis sobre el archivo cacheado
+        results_json = run_analysis_collect_json(
+            input_path=CACHED_FILE,
+            economy_data=economy_data,
+            analysis=analysis,
+            company_folder=None,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error ejecutando análisis: {str(e)}",
+        )
+
+    # Limpiar NaN/inf para que el JSON sea válido
+    safe_results = sanitize_for_json(results_json)
+
+    return JSONResponse(
+        content={
+            "user": current_user,
+            "results": safe_results,
+            "source": "cached",
+            "dateRange": date_range,
+            "uniqueQueues": unique_queues,
         }
     )

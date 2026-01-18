@@ -4,7 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # importa tus routers
 from beyond_api.api.analysis import router as analysis_router
-from beyond_api.api.auth import router as auth_router   # 👈 nuevo
+from beyond_api.api.auth import router as auth_router
+from beyond_api.api.cache import router as cache_router
 
 def setup_basic_logging() -> None:
     logging.basicConfig(
@@ -30,4 +31,5 @@ app.add_middleware(
 )
 
 app.include_router(analysis_router)
-app.include_router(auth_router)  # 👈 registrar el router de auth
+app.include_router(auth_router)
+app.include_router(cache_router)

@@ -60,7 +60,65 @@ export interface RawInteraction {
   wrap_up_time: number;       // Tiempo ACW post-llamada (segundos)
   agent_id: string;           // ID agente (anónimo/hash)
   transfer_flag: boolean;     // Indicador de transferencia
+  repeat_call_7d?: boolean;   // True si el cliente llamó en los últimos 7 días (para FCR)
   caller_id?: string;         // ID cliente (opcional, hash/anónimo)
+  disconnection_type?: string; // Tipo de desconexión (Externo/Interno/etc.)
+  total_conversation?: number; // Conversación total en segundos (null/0 = abandono)
+  is_abandoned?: boolean; // Flag directo de abandono del CSV
+  record_status?: 'valid' | 'noise' | 'zombie' | 'abandon'; // Estado del registro para filtrado
+  fcr_real_flag?: boolean; // FCR pre-calculado en el CSV (TRUE = resuelto en primer contacto)
+  // v3.0: Campos para drill-down (jerarquía de 2 niveles)
+  original_queue_id?: string; // Nombre real de la cola en centralita (nivel operativo)
+  linea_negocio?: string;     // Línea de negocio (business_unit) - 9 categorías C-Level
+  // queue_skill ya existe arriba como nivel estratégico
+}
+
+// Tipo para filtrado por record_status
+export type RecordStatus = 'valid' | 'noise' | 'zombie' | 'abandon';
+
+// v3.4: Tier de clasificación para roadmap
+export type AgenticTier = 'AUTOMATE' | 'ASSIST' | 'AUGMENT' | 'HUMAN-ONLY';
+
+// v3.4: Desglose del score por factores
+export interface AgenticScoreBreakdown {
+  predictibilidad: number;  // 30% - basado en CV AHT
+  resolutividad: number;    // 25% - FCR (60%) + Transfer (40%)
+  volumen: number;          // 25% - basado en volumen mensual
+  calidadDatos: number;     // 10% - % registros válidos
+  simplicidad: number;      // 10% - basado en AHT
+}
+
+// v3.4: Métricas por cola individual (original_queue_id - nivel operativo)
+export interface OriginalQueueMetrics {
+  original_queue_id: string;  // Nombre real de la cola en centralita
+  volume: number;             // Total de interacciones
+  volumeValid: number;        // Sin NOISE/ZOMBIE (para cálculo CV)
+  aht_mean: number;           // AHT promedio (segundos)
+  cv_aht: number;             // CV AHT calculado solo sobre VALID (%)
+  transfer_rate: number;      // Tasa de transferencia (%)
+  fcr_rate: number;           // FCR (%)
+  agenticScore: number;       // Score de automatización (0-10)
+  scoreBreakdown?: AgenticScoreBreakdown;  // v3.4: Desglose por factores
+  tier: AgenticTier;          // v3.4: Clasificación para roadmap
+  tierMotivo?: string;        // v3.4: Motivo de la clasificación
+  isPriorityCandidate: boolean;  // Tier 1 (AUTOMATE)
+  annualCost?: number;        // Coste anual estimado
+}
+
+// v3.1: Tipo para drill-down - Nivel 1: queue_skill (estratégico)
+export interface DrilldownDataPoint {
+  skill: string;              // queue_skill (categoría estratégica)
+  originalQueues: OriginalQueueMetrics[];  // Colas reales de centralita (nivel 2)
+  // Métricas agregadas del grupo
+  volume: number;             // Total de interacciones del grupo
+  volumeValid: number;        // Sin NOISE/ZOMBIE
+  aht_mean: number;           // AHT promedio ponderado (segundos)
+  cv_aht: number;             // CV AHT promedio ponderado (%)
+  transfer_rate: number;      // Tasa de transferencia ponderada (%)
+  fcr_rate: number;           // FCR ponderado (%)
+  agenticScore: number;       // Score de automatización promedio (0-10)
+  isPriorityCandidate: boolean;  // Al menos una cola con CV < 75%
+  annualCost?: number;        // Coste anual total del grupo
 }
 
 // Métricas calculadas por skill
@@ -68,7 +126,7 @@ export interface SkillMetrics {
   skill: string;
   volume: number;             // Total de interacciones
   channel: string;            // Canal predominante
-  
+
   // Métricas de rendimiento (calculadas)
   fcr: number;                // FCR aproximado: 100% - transfer_rate
   aht: number;                // AHT = duration_talk + hold_time + wrap_up_time
@@ -76,19 +134,20 @@ export interface SkillMetrics {
   avg_hold_time: number;      // Promedio hold_time
   avg_wrap_up: number;        // Promedio wrap_up_time
   transfer_rate: number;      // % con transfer_flag = true
-  
+  abandonment_rate: number;   // % abandonos (desconexión externa + sin conversación)
+
   // Métricas de variabilidad
   cv_aht: number;             // Coeficiente de variación AHT (%)
   cv_talk_time: number;       // CV de duration_talk (proxy de variabilidad input)
   cv_hold_time: number;       // CV de hold_time
-  
+
   // Distribución temporal
   hourly_distribution: number[];  // 24 valores (0-23h)
   off_hours_pct: number;      // % llamadas fuera de horario (19:00-08:00)
-  
+
   // Coste
   annual_cost: number;        // Volumen × AHT × cost_per_hour × 12
-  
+
   // Outliers y complejidad
   outlier_rate: number;       // % casos con AHT > P90
 }
@@ -102,12 +161,14 @@ export interface Kpi {
   changeType?: 'positive' | 'negative' | 'neutral';
 }
 
-// v3.0: 5 dimensiones viables
+// v4.0: 7 dimensiones viables
 export type DimensionName =
   | 'volumetry_distribution'      // Volumetría & Distribución
   | 'operational_efficiency'      // Eficiencia Operativa
   | 'effectiveness_resolution'    // Efectividad & Resolución
   | 'complexity_predictability'   // Complejidad & Predictibilidad
+  | 'customer_satisfaction'       // Satisfacción del Cliente (CSAT)
+  | 'economy_cpi'                 // Economía Operacional (CPI)
   | 'agentic_readiness';          // Agentic Readiness
 
 export interface SubFactor {
@@ -151,6 +212,7 @@ export interface HeatmapDataPoint {
     csat: number;   // Customer Satisfaction score (0-100) - MANUAL (estático)
     hold_time: number;  // Hold Time promedio (segundos) - CALCULADO
     transfer_rate: number;  // % transferencias - CALCULADO
+    abandonment_rate: number;  // % abandonos - CALCULADO
   };
   annual_cost?: number;  // Coste anual en euros (calculado con cost_per_hour)
   
@@ -185,11 +247,14 @@ export interface Opportunity {
   customer_segment?: CustomerSegment;  // v2.0: Nuevo campo opcional
 }
 
-export enum RoadmapPhase {
-  Automate = 'Automate',
-  Assist = 'Assist',
-  Augment = 'Augment'
-}
+// Usar objeto const en lugar de enum para evitar problemas de tree-shaking con Vite
+export const RoadmapPhase = {
+  Automate: 'Automate',
+  Assist: 'Assist',
+  Augment: 'Augment'
+} as const;
+
+export type RoadmapPhase = typeof RoadmapPhase[keyof typeof RoadmapPhase];
 
 export interface RoadmapInitiative {
   id: string;
@@ -200,6 +265,15 @@ export interface RoadmapInitiative {
   resources: string[];
   dimensionId: string;
   risk?: 'high' | 'medium' | 'low';  // v2.0: Nuevo campo
+  // v2.1: Campos para trazabilidad
+  skillsImpacted?: string[];         // Skills que impacta
+  savingsDetail?: string;            // Detalle del cálculo de ahorro
+  estimatedSavings?: number;         // Ahorro estimado €
+  resourceHours?: number;            // Horas estimadas de recursos
+  // v3.0: Campos mejorados conectados con skills reales
+  volumeImpacted?: number;           // Volumen de interacciones impactadas
+  kpiObjective?: string;             // Objetivo KPI específico
+  rationale?: string;                // Justificación de la iniciativa
 }
 
 export interface Finding {
@@ -270,4 +344,6 @@ export interface AnalysisData {
   agenticReadiness?: AgenticReadinessResult;  // v2.0: Nuevo campo
   staticConfig?: StaticConfig;  // v2.0: Configuración estática usada
   source?: AnalysisSource;
+  dateRange?: { min: string; max: string };  // v2.1: Periodo analizado
+  drilldownData?: DrilldownDataPoint[];  // v3.0: Drill-down Cola + Tipificación
 }

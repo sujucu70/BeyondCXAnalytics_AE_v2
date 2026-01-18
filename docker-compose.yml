@@ -9,6 +9,9 @@ services:
       # credenciales del API (las mismas que usas ahora)
       BASIC_AUTH_USERNAME: "beyond"
       BASIC_AUTH_PASSWORD: "beyond2026"
+      CACHE_DIR: "/data/cache"
+    volumes:
+      - cache-data:/data/cache
     expose:
       - "8000"
     networks:
@@ -40,6 +43,10 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
     networks:
       - beyond-net
+
+volumes:
+  cache-data:
+    driver: local
 
 networks:
   beyond-net:

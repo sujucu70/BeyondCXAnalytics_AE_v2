@@ -1,6 +1,6 @@
 // analysisGenerator.ts - v2.0 con 6 dimensiones
-import type { AnalysisData, Kpi, DimensionAnalysis, HeatmapDataPoint, Opportunity, RoadmapInitiative, EconomicModelData, BenchmarkDataPoint, Finding, Recommendation, TierKey, CustomerSegment } from '../types';
-import { generateAnalysisFromRealData } from './realDataAnalysis';
+import type { AnalysisData, Kpi, DimensionAnalysis, HeatmapDataPoint, Opportunity, RoadmapInitiative, EconomicModelData, BenchmarkDataPoint, Finding, Recommendation, TierKey, CustomerSegment, RawInteraction, DrilldownDataPoint, AgenticTier } from '../types';
+import { generateAnalysisFromRealData, calculateDrilldownMetrics, generateOpportunitiesFromDrilldown, generateRoadmapFromDrilldown } from './realDataAnalysis';
 import { RoadmapPhase } from '../types';
 import { BarChartHorizontal, Zap, Target, Brain, Bot } from 'lucide-react';
 import { calculateAgenticReadinessScore, type AgenticReadinessInput } from './agenticReadinessV2';
@@ -9,6 +9,7 @@ import {
   mapBackendResultsToAnalysisData,
   buildHeatmapFromBackend,
 } from './backendMapper';
+import { saveFileToServerCache, saveDrilldownToServerCache, getCachedDrilldown } from './serverCache';
 
 
 
@@ -99,9 +100,10 @@ const DIMENSIONS_CONTENT = {
     },
 };
 
+// Hallazgos genéricos - los específicos se generan en realDataAnalysis.ts desde datos calculados
 const KEY_FINDINGS: Finding[] = [
     {
-        text: "El ratio P90/P50 de AHT es alto (>2.0) en varias colas, indicando alta variabilidad.",
+        text: "El ratio P90/P50 de AHT es alto (>2.0), indicando alta variabilidad en tiempos de gestión.",
         dimensionId: 'operational_efficiency',
         type: 'warning',
         title: 'Alta Variabilidad en Tiempos',
@@ -109,52 +111,36 @@ const KEY_FINDINGS: Finding[] = [
         impact: 'high'
     },
     {
-        text: "Un 22% de las transferencias desde 'Soporte Técnico N1' hacia otras colas son incorrectas.",
+        text: "Tasa de transferencias elevada indica oportunidad de mejora en enrutamiento o capacitación.",
         dimensionId: 'effectiveness_resolution',
         type: 'warning',
-        title: 'Enrutamiento Incorrecto',
-        description: 'Existe un problema de routing que genera ineficiencias y experiencia pobre del cliente.',
+        title: 'Transferencias Elevadas',
+        description: 'Las transferencias frecuentes afectan la experiencia del cliente y la eficiencia operativa.',
         impact: 'high'
     },
     {
-        text: "El pico de demanda de los lunes por la mañana provoca una caída del Nivel de Servicio al 65%.",
+        text: "Concentración de volumen en franjas horarias específicas genera picos de demanda.",
         dimensionId: 'volumetry_distribution',
-        type: 'critical',
-        title: 'Crisis de Capacidad (Lunes por la mañana)',
-        description: 'Los lunes 8-11h generan picos impredecibles que agotan la capacidad disponible.',
-        impact: 'high'
+        type: 'info',
+        title: 'Concentración de Demanda',
+        description: 'Revisar capacidad en franjas de mayor volumen para optimizar nivel de servicio.',
+        impact: 'medium'
     },
     {
-        text: "El 28% de las interacciones ocurren fuera del horario laboral estándar (8-18h).",
+        text: "Porcentaje significativo de interacciones fuera del horario laboral estándar (8-19h).",
         dimensionId: 'volumetry_distribution',
         type: 'info',
         title: 'Demanda Fuera de Horario',
-        description: 'Casi 1 de 3 interacciones se produce fuera del horario laboral, requiriendo cobertura extendida.',
+        description: 'Evaluar cobertura extendida o canales de autoservicio para demanda fuera de horario.',
         impact: 'medium'
     },
     {
-        text: "Las consultas sobre 'estado del pedido' representan el 30% de las interacciones y tienen alta repetitividad.",
+        text: "Oportunidades de automatización identificadas en consultas repetitivas de alto volumen.",
         dimensionId: 'agentic_readiness',
         type: 'info',
-        title: 'Oportunidad de Automatización: Estado de Pedido',
-        description: 'Volumen significativo en consultas altamente repetitivas y automatizables (Score Agentic >8).',
+        title: 'Oportunidad de Automatización',
+        description: 'Skills con alta repetitividad y baja complejidad son candidatos ideales para agentes IA.',
         impact: 'high'
-    },
-    {
-        text: "FCR proxy <75% en colas de facturación, alto recontacto a 7 días.",
-        dimensionId: 'effectiveness_resolution',
-        type: 'warning',
-        title: 'Baja Resolución en Facturación',
-        description: 'El equipo de facturación tiene alto % de recontactos, indicando problemas de resolución.',
-        impact: 'high'
-    },
-    {
-        text: "Alta diversidad de tipificaciones y >20% llamadas con múltiples holds en colas complejas.",
-        dimensionId: 'complexity_predictability',
-        type: 'warning',
-        title: 'Alta Complejidad en Ciertas Colas',
-        description: 'Colas con alta complejidad requieren optimización antes de considerar automatización.',
-        impact: 'medium'
     },
 ];
 
@@ -801,8 +787,8 @@ const generateOpportunitiesFromHeatmap = (
       readiness >= 70
         ? 'Automatizar '
         : readiness >= 40
-        ? 'Augmentar con IA en '
-        : 'Optimizar proceso en ';
+        ? 'Asistir con IA en '
+        : 'Optimizar procesos en ';
 
     const idSlug = skillName
       .toLowerCase()
@@ -900,6 +886,33 @@ export const generateAnalysis = async (
   if (file && !useSynthetic) {
     console.log('📡 Processing file (API first):', file.name);
 
+    // Pre-parsear archivo para obtener dateRange y interacciones (se usa en ambas rutas)
+    let dateRange: { min: string; max: string } | undefined;
+    let parsedInteractions: RawInteraction[] | undefined;
+    try {
+      const { parseFile, validateInteractions } = await import('./fileParser');
+      const interactions = await parseFile(file);
+      const validation = validateInteractions(interactions);
+      dateRange = validation.stats.dateRange || undefined;
+      parsedInteractions = interactions; // Guardar para usar en drilldownData
+      console.log(`📅 Date range extracted: ${dateRange?.min} to ${dateRange?.max}`);
+      console.log(`📊 Parsed ${interactions.length} interactions for drilldown`);
+
+      // Cachear el archivo CSV en el servidor para uso futuro
+      try {
+        if (authHeaderOverride && file) {
+          await saveFileToServerCache(authHeaderOverride, file, costPerHour);
+          console.log(`💾 Archivo CSV cacheado en el servidor para uso futuro`);
+        } else {
+          console.warn('⚠️ No se pudo cachear: falta authHeader o file');
+        }
+      } catch (cacheError) {
+        console.warn('⚠️ No se pudo cachear archivo:', cacheError);
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not extract dateRange from file:', e);
+    }
+
     // 1) Intentar backend + mapeo
     try {
       const raw = await callAnalysisApiRaw({
@@ -913,6 +926,9 @@ export const generateAnalysis = async (
 
       const mapped = mapBackendResultsToAnalysisData(raw, tier);
 
+      // Añadir dateRange extraído del archivo
+      mapped.dateRange = dateRange;
+
       // Heatmap: primero lo construimos a partir de datos reales del backend
       mapped.heatmapData = buildHeatmapFromBackend(
         raw,
@@ -921,22 +937,44 @@ export const generateAnalysis = async (
         segmentMapping
       );
 
-      // Oportunidades: AHORA basadas en heatmap real + modelo económico del backend
-      mapped.opportunities = generateOpportunitiesFromHeatmap(
-        mapped.heatmapData,
-        mapped.economicModel
-      );
+      // v3.5: Calcular drilldownData PRIMERO (necesario para opportunities y roadmap)
+      if (parsedInteractions && parsedInteractions.length > 0) {
+        mapped.drilldownData = calculateDrilldownMetrics(parsedInteractions, costPerHour);
+        console.log(`📊 Drill-down calculado: ${mapped.drilldownData.length} skills, ${mapped.drilldownData.filter(d => d.isPriorityCandidate).length} candidatos prioritarios`);
 
-      // 👉 El resto sigue siendo "frontend-driven" de momento
+        // Cachear drilldownData en el servidor para uso futuro (no bloquea)
+        if (authHeaderOverride && mapped.drilldownData.length > 0) {
+          saveDrilldownToServerCache(authHeaderOverride, mapped.drilldownData)
+            .then(success => {
+              if (success) console.log('💾 DrilldownData cacheado en servidor');
+              else console.warn('⚠️ No se pudo cachear drilldownData');
+            })
+            .catch(err => console.warn('⚠️ Error cacheando drilldownData:', err));
+        }
+
+        // Usar oportunidades y roadmap basados en drilldownData (datos reales)
+        mapped.opportunities = generateOpportunitiesFromDrilldown(mapped.drilldownData, costPerHour);
+        mapped.roadmap = generateRoadmapFromDrilldown(mapped.drilldownData, costPerHour);
+        console.log(`📊 Opportunities: ${mapped.opportunities.length}, Roadmap: ${mapped.roadmap.length}`);
+      } else {
+        console.warn('⚠️ No hay interacciones parseadas, usando heatmap para opportunities');
+        // Fallback: usar heatmap (menos preciso)
+        mapped.opportunities = generateOpportunitiesFromHeatmap(
+          mapped.heatmapData,
+          mapped.economicModel
+        );
+        mapped.roadmap = generateRoadmapData();
+      }
+
+      // Findings y recommendations
       mapped.findings = generateFindingsFromData(mapped);
       mapped.recommendations = generateRecommendationsFromData(mapped);
-      mapped.roadmap = generateRoadmapData();
 
-      // Benchmark: de momento no tenemos datos reales -> no lo generamos en modo backend
+      // Benchmark: de momento no tenemos datos reales
       mapped.benchmarkData = [];
 
       console.log(
-        '✅ Usando resultados del backend mapeados (heatmap + opportunities reales)'
+        '✅ Usando resultados del backend mapeados (heatmap + opportunities + drilldown reales)'
       );
       return mapped;
 
@@ -996,11 +1034,208 @@ export const generateAnalysis = async (
   if (sheetUrl && !useSynthetic) {
     console.warn('🔗 Google Sheets URL processing not implemented yet, using synthetic data');
   }
-  
+
   // Generar datos sintéticos (fallback)
   console.log('✨ Generating synthetic data');
   return generateSyntheticAnalysis(tier, costPerHour, avgCsat, segmentMapping);
 };
+
+/**
+ * Genera análisis usando el archivo CSV cacheado en el servidor
+ * Permite re-analizar sin necesidad de subir el archivo de nuevo
+ * Funciona entre diferentes navegadores y dispositivos
+ *
+ * v3.5: Descarga el CSV cacheado para parsear localmente y obtener
+ * todas las colas originales (original_queue_id) en lugar de solo
+ * las 9 categorías agregadas (queue_skill)
+ */
+export const generateAnalysisFromCache = async (
+  tier: TierKey,
+  costPerHour: number = 20,
+  avgCsat: number = 85,
+  segmentMapping?: { high_value_queues: string[]; medium_value_queues: string[]; low_value_queues: string[] },
+  authHeaderOverride?: string
+): Promise<AnalysisData> => {
+  console.log('💾 Analyzing from server-cached file...');
+
+  // Verificar que tenemos authHeader
+  if (!authHeaderOverride) {
+    throw new Error('Se requiere autenticación para acceder a la caché del servidor.');
+  }
+
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+  // Preparar datos de economía
+  const economyData = {
+    costPerHour,
+    avgCsat,
+    segmentMapping,
+  };
+
+  // Crear FormData para el endpoint
+  const formData = new FormData();
+  formData.append('economy_json', JSON.stringify(economyData));
+  formData.append('analysis', 'premium');
+
+  console.log('📡 Running backend analysis and drilldown fetch in parallel...');
+
+  // === EJECUTAR EN PARALELO: Backend analysis + DrilldownData fetch ===
+  const backendAnalysisPromise = fetch(`${API_BASE_URL}/analysis/cached`, {
+    method: 'POST',
+    headers: {
+      Authorization: authHeaderOverride,
+    },
+    body: formData,
+  });
+
+  // Obtener drilldownData cacheado (pequeño JSON, muy rápido)
+  const drilldownPromise = getCachedDrilldown(authHeaderOverride);
+
+  // Esperar ambas operaciones en paralelo
+  const [response, cachedDrilldownData] = await Promise.all([backendAnalysisPromise, drilldownPromise]);
+
+  if (cachedDrilldownData) {
+    console.log(`✅ Got cached drilldownData: ${cachedDrilldownData.length} skills`);
+  } else {
+    console.warn('⚠️ No cached drilldownData found, will use heatmap fallback');
+  }
+
+  try {
+    if (response.status === 404) {
+      throw new Error('No hay archivo cacheado en el servidor. Por favor, sube un archivo CSV primero.');
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Backend error:', response.status, errorText);
+      throw new Error(`Error del servidor (${response.status}): ${errorText}`);
+    }
+
+    const rawResponse = await response.json();
+    const raw = rawResponse.results;
+    const dateRangeFromBackend = rawResponse.dateRange;
+    const uniqueQueuesFromBackend = rawResponse.uniqueQueues;
+    console.log('✅ Backend analysis from cache completed');
+    console.log('📅 Date range from backend:', dateRangeFromBackend);
+    console.log('📊 Unique queues from backend:', uniqueQueuesFromBackend);
+
+    // Mapear resultados del backend a AnalysisData (solo 2 parámetros)
+    console.log('📦 Raw backend results keys:', Object.keys(raw || {}));
+    console.log('📦 volumetry:', raw?.volumetry ? 'present' : 'missing');
+    console.log('📦 operational_performance:', raw?.operational_performance ? 'present' : 'missing');
+    console.log('📦 agentic_readiness:', raw?.agentic_readiness ? 'present' : 'missing');
+
+    const mapped = mapBackendResultsToAnalysisData(raw, tier);
+    console.log('📊 Mapped data summaryKpis:', mapped.summaryKpis?.length || 0);
+    console.log('📊 Mapped data dimensions:', mapped.dimensions?.length || 0);
+
+    // Añadir dateRange desde el backend
+    if (dateRangeFromBackend && dateRangeFromBackend.min && dateRangeFromBackend.max) {
+      mapped.dateRange = dateRangeFromBackend;
+    }
+
+    // Heatmap: construir a partir de datos reales del backend
+    mapped.heatmapData = buildHeatmapFromBackend(
+      raw,
+      costPerHour,
+      avgCsat,
+      segmentMapping
+    );
+    console.log('📊 Heatmap data points:', mapped.heatmapData?.length || 0);
+
+    // === DrilldownData: usar cacheado (rápido) o fallback a heatmap ===
+    if (cachedDrilldownData && cachedDrilldownData.length > 0) {
+      // Usar drilldownData cacheado directamente (ya calculado al subir archivo)
+      mapped.drilldownData = cachedDrilldownData;
+      console.log(`📊 Usando drilldownData cacheado: ${mapped.drilldownData.length} skills`);
+
+      // Contar colas originales para log
+      const uniqueOriginalQueues = new Set(
+        mapped.drilldownData.flatMap((d: any) =>
+          (d.originalQueues || []).map((q: any) => q.original_queue_id)
+        ).filter((q: string) => q && q.trim() !== '')
+      ).size;
+      console.log(`📊 Total original queues: ${uniqueOriginalQueues}`);
+
+      // Usar oportunidades y roadmap basados en drilldownData real
+      mapped.opportunities = generateOpportunitiesFromDrilldown(mapped.drilldownData, costPerHour);
+      mapped.roadmap = generateRoadmapFromDrilldown(mapped.drilldownData, costPerHour);
+      console.log(`📊 Opportunities: ${mapped.opportunities.length}, Roadmap: ${mapped.roadmap.length}`);
+    } else if (mapped.heatmapData && mapped.heatmapData.length > 0) {
+      // Fallback: usar heatmap (solo 9 skills agregados)
+      console.warn('⚠️ Sin drilldownData cacheado, usando heatmap fallback');
+      mapped.drilldownData = generateDrilldownFromHeatmap(mapped.heatmapData, costPerHour);
+      console.log(`📊 Drill-down desde heatmap (fallback): ${mapped.drilldownData.length} skills`);
+
+      mapped.opportunities = generateOpportunitiesFromHeatmap(
+        mapped.heatmapData,
+        mapped.economicModel
+      );
+      mapped.roadmap = generateRoadmapData();
+    }
+
+    // Findings y recommendations
+    mapped.findings = generateFindingsFromData(mapped);
+    mapped.recommendations = generateRecommendationsFromData(mapped);
+
+    // Benchmark: vacío por ahora
+    mapped.benchmarkData = [];
+
+    // Marcar que viene del backend/caché
+    mapped.source = 'backend';
+
+    console.log('✅ Analysis generated from server-cached file');
+    return mapped;
+  } catch (error) {
+    console.error('❌ Error analyzing from cache:', error);
+    throw error;
+  }
+};
+
+// Función auxiliar para generar drilldownData desde heatmapData cuando no tenemos parsedInteractions
+function generateDrilldownFromHeatmap(
+  heatmapData: HeatmapDataPoint[],
+  costPerHour: number
+): DrilldownDataPoint[] {
+  return heatmapData.map(hp => {
+    const cvAht = hp.variability?.cv_aht || 0;
+    const transferRate = hp.variability?.transfer_rate || hp.metrics?.transfer_rate || 0;
+    const fcrRate = hp.metrics?.fcr || 0;
+    const agenticScore = hp.dimensions
+      ? (hp.dimensions.predictability * 0.4 + hp.dimensions.complexity_inverse * 0.35 + hp.dimensions.repetitivity * 0.25)
+      : (hp.automation_readiness || 0) / 10;
+
+    // Determinar tier basado en el score
+    let tier: AgenticTier = 'HUMAN-ONLY';
+    if (agenticScore >= 7.5) tier = 'AUTOMATE';
+    else if (agenticScore >= 5.5) tier = 'ASSIST';
+    else if (agenticScore >= 3.5) tier = 'AUGMENT';
+
+    return {
+      skill: hp.skill,
+      volume: hp.volume,
+      volumeValid: hp.volume,
+      aht_mean: hp.aht_seconds,
+      cv_aht: cvAht,
+      transfer_rate: transferRate,
+      fcr_rate: fcrRate,
+      agenticScore: agenticScore,
+      isPriorityCandidate: cvAht < 75,
+      originalQueues: [{
+        original_queue_id: hp.skill,
+        volume: hp.volume,
+        volumeValid: hp.volume,
+        aht_mean: hp.aht_seconds,
+        cv_aht: cvAht,
+        transfer_rate: transferRate,
+        fcr_rate: fcrRate,
+        agenticScore: agenticScore,
+        tier: tier,
+        isPriorityCandidate: cvAht < 75,
+      }],
+    };
+  });
+}
 
 // Función auxiliar para generar análisis con datos sintéticos
 const generateSyntheticAnalysis = (

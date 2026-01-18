@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Info } from 'lucide-react';
 import { DashboardHeader, TabId } from './DashboardHeader';
 import { ExecutiveSummaryTab } from './tabs/ExecutiveSummaryTab';
 import { DimensionAnalysisTab } from './tabs/DimensionAnalysisTab';
 import { AgenticReadinessTab } from './tabs/AgenticReadinessTab';
 import { RoadmapTab } from './tabs/RoadmapTab';
+import { MetodologiaDrawer } from './MetodologiaDrawer';
 import type { AnalysisData } from '../types';
 
 interface DashboardTabsProps {
@@ -20,15 +21,16 @@ export function DashboardTabs({
   onBack
 }: DashboardTabsProps) {
   const [activeTab, setActiveTab] = useState<TabId>('executive');
+  const [metodologiaOpen, setMetodologiaOpen] = useState(false);
 
   const renderTabContent = () => {
     switch (activeTab) {
       case 'executive':
-        return <ExecutiveSummaryTab data={data} />;
+        return <ExecutiveSummaryTab data={data} onTabChange={setActiveTab} />;
       case 'dimensions':
         return <DimensionAnalysisTab data={data} />;
       case 'readiness':
-        return <AgenticReadinessTab data={data} />;
+        return <AgenticReadinessTab data={data} onTabChange={setActiveTab} />;
       case 'roadmap':
         return <RoadmapTab data={data} />;
       default:
@@ -41,13 +43,14 @@ export function DashboardTabs({
       {/* Back button */}
       {onBack && (
         <div className="bg-white border-b border-slate-200">
-          <div className="max-w-7xl mx-auto px-6 py-2">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2">
             <button
               onClick={onBack}
               className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-800 transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
-              Volver al formulario
+              <span className="hidden sm:inline">Volver al formulario</span>
+              <span className="sm:hidden">Volver</span>
             </button>
           </div>
         </div>
@@ -61,7 +64,7 @@ export function DashboardTabs({
       />
 
       {/* Tab Content */}
-      <main className="max-w-7xl mx-auto px-6 py-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -77,16 +80,37 @@ export function DashboardTabs({
 
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white mt-8">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between text-sm text-slate-500">
-            <span>Beyond Diagnosis - Contact Center Analytics Platform</span>
-            <span>
-              Análisis: {data.tier ? data.tier.toUpperCase() : 'GOLD'} |
-              Fuente: {data.source || 'synthetic'}
-            </span>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm text-slate-500">
+            <span className="hidden sm:inline">Beyond Diagnosis - Contact Center Analytics Platform</span>
+            <span className="sm:hidden text-xs">Beyond Diagnosis</span>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <span className="text-xs sm:text-sm">
+                {data.tier ? data.tier.toUpperCase() : 'GOLD'} |
+                {data.source === 'backend' ? 'Genesys' : data.source || 'synthetic'}
+              </span>
+              <span className="hidden sm:inline text-slate-300">|</span>
+              {/* Badge Metodología */}
+              <button
+                onClick={() => setMetodologiaOpen(true)}
+                className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 bg-green-100 text-green-800 rounded-full text-[10px] sm:text-xs font-medium hover:bg-green-200 transition-colors cursor-pointer"
+              >
+                <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden md:inline">Metodología de Transformación de Datos aplicada</span>
+                <span className="md:hidden">Metodología</span>
+                <Info className="w-2.5 h-2.5 sm:w-3 sm:h-3 opacity-60" />
+              </button>
+            </div>
           </div>
         </div>
       </footer>
+
+      {/* Drawer de Metodología */}
+      <MetodologiaDrawer
+        isOpen={metodologiaOpen}
+        onClose={() => setMetodologiaOpen(false)}
+        data={data}
+      />
     </div>
   );
 }

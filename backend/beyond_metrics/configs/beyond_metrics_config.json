@@ -23,6 +23,7 @@
         "fcr_rate",
         "escalation_rate",
         "abandonment_rate",
+        "high_hold_time_rate",
         "recurrence_rate_7d",
         "repeat_channel_rate",
         "occupancy_rate",

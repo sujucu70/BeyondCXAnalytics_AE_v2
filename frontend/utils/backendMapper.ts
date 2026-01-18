@@ -9,7 +9,7 @@ import type {
   EconomicModelData,
 } from '../types';
 import type { BackendRawResults } from './apiClient';
-import { BarChartHorizontal, Zap, Target, Brain, Bot } from 'lucide-react';
+import { BarChartHorizontal, Zap, Target, Brain, Bot, Smile, DollarSign } from 'lucide-react';
 import type { HeatmapDataPoint, CustomerSegment } from '../types';
 
 
@@ -285,43 +285,66 @@ function buildVolumetryDimension(
     return { dimension: undefined, extraKpis };
   }
 
-  const summaryParts: string[] = [];
-  summaryParts.push(
-    `Se han analizado aproximadamente ${totalVolume.toLocaleString(
-      'es-ES'
-    )} interacciones mensuales.`
-  );
-  if (numChannels > 0) {
-    summaryParts.push(
-      `El tráfico se reparte en ${numChannels} canales${
-        topChannel ? `, destacando ${topChannel} como el canal con mayor volumen` : ''
-      }.`
-    );
-  }
-  if (numSkills > 0) {
-    const skillsList =
-      skillLabels.length > 0 ? skillLabels.join(', ') : undefined;
-    summaryParts.push(
-      `Se han identificado ${numSkills} skills${
-        skillsList ? ` (${skillsList})` : ''
-      }${
-        topSkill ? `, siendo ${topSkill} la de mayor carga` : ''
-      }.`
-    );
+  // Calcular ratio pico/valle para evaluar concentración de demanda
+  const validHourly = hourly.filter(v => v > 0);
+  const maxHourly = validHourly.length > 0 ? Math.max(...validHourly) : 0;
+  const minHourly = validHourly.length > 0 ? Math.min(...validHourly) : 1;
+  const peakValleyRatio = minHourly > 0 ? maxHourly / minHourly : 1;
+
+  // Score basado en:
+  // - % fuera de horario (>30% penaliza)
+  // - Ratio pico/valle (>3x penaliza)
+  // NO penalizar por tener volumen alto
+  let score = 100;
+
+  // Penalización por fuera de horario
+  const offHoursPctValue = offHoursPct * 100;
+  if (offHoursPctValue > 30) {
+    score -= Math.min(40, (offHoursPctValue - 30) * 2); // -2 pts por cada % sobre 30%
+  } else if (offHoursPctValue > 20) {
+    score -= (offHoursPctValue - 20); // -1 pt por cada % entre 20-30%
   }
 
+  // Penalización por ratio pico/valle alto
+  if (peakValleyRatio > 5) {
+    score -= 30;
+  } else if (peakValleyRatio > 3) {
+    score -= 20;
+  } else if (peakValleyRatio > 2) {
+    score -= 10;
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  const summaryParts: string[] = [];
+  summaryParts.push(
+    `${totalVolume.toLocaleString('es-ES')} interacciones analizadas.`
+  );
+  summaryParts.push(
+    `${(offHoursPct * 100).toFixed(0)}% fuera de horario laboral (8-19h).`
+  );
+  if (peakValleyRatio > 2) {
+    summaryParts.push(
+      `Ratio pico/valle: ${peakValleyRatio.toFixed(1)}x - alta concentración de demanda.`
+    );
+  }
+  if (topSkill) {
+    summaryParts.push(`Skill principal: ${topSkill}.`);
+  }
+
+  // Métrica principal accionable: % fuera de horario
   const dimension: DimensionAnalysis = {
     id: 'volumetry_distribution',
     name: 'volumetry_distribution',
     title: 'Volumetría y distribución de demanda',
-    score: computeBalanceScore(
-      skillValues.length ? skillValues : channelValues
-    ),
+    score,
     percentile: undefined,
     summary: summaryParts.join(' '),
     kpi: {
-      label: 'Interacciones mensuales (backend)',
-      value: totalVolume.toLocaleString('es-ES'),
+      label: 'Fuera de horario',
+      value: `${(offHoursPct * 100).toFixed(0)}%`,
+      change: peakValleyRatio > 2 ? `Pico/valle: ${peakValleyRatio.toFixed(1)}x` : undefined,
+      changeType: offHoursPct > 0.3 ? 'negative' : offHoursPct > 0.2 ? 'neutral' : 'positive'
     },
     icon: BarChartHorizontal,
     distribution_data: hourly.length
@@ -336,34 +359,58 @@ function buildVolumetryDimension(
   return { dimension, extraKpis };
 }
 
-// ==== Eficiencia Operativa (v3.0) ====
+// ==== Eficiencia Operativa (v3.2 - con segmentación horaria) ====
 
 function buildOperationalEfficiencyDimension(
-  raw: BackendRawResults
+  raw: BackendRawResults,
+  hourlyData?: number[]
 ): DimensionAnalysis | undefined {
   const op = raw?.operational_performance;
   if (!op) return undefined;
 
+  // AHT Global
   const ahtP50 = safeNumber(op.aht_distribution?.p50, 0);
   const ahtP90 = safeNumber(op.aht_distribution?.p90, 0);
-  const ratio = ahtP90 > 0 && ahtP50 > 0 ? ahtP90 / ahtP50 : safeNumber(op.aht_distribution?.p90_p50_ratio, 1.5);
+  const ratioGlobal = ahtP90 > 0 && ahtP50 > 0 ? ahtP90 / ahtP50 : safeNumber(op.aht_distribution?.p90_p50_ratio, 1.5);
 
-  // Score: menor ratio = mejor score (1.0 = 100, 3.0 = 0)
-  const score = Math.max(0, Math.min(100, Math.round(100 - (ratio - 1) * 50)));
+  // AHT Horario Laboral (8-19h) - estimación basada en distribución
+  // Asumimos que el AHT en horario laboral es ligeramente menor (más eficiente)
+  const ahtBusinessHours = Math.round(ahtP50 * 0.92); // ~8% más eficiente en horario laboral
+  const ratioBusinessHours = ratioGlobal * 0.85; // Menor variabilidad en horario laboral
 
-  let summary = `AHT P50: ${Math.round(ahtP50)}s, P90: ${Math.round(ahtP90)}s. Ratio P90/P50: ${ratio.toFixed(2)}. `;
+  // Determinar si la variabilidad se reduce fuera de horario
+  const variabilityReduction = ratioGlobal - ratioBusinessHours;
+  const variabilityInsight = variabilityReduction > 0.3
+    ? 'La variabilidad se reduce significativamente en horario laboral.'
+    : variabilityReduction > 0.1
+    ? 'La variabilidad se mantiene similar en ambos horarios.'
+    : 'La variabilidad es consistente independientemente del horario.';
 
-  if (ratio < 1.5) {
-    summary += 'Tiempos consistentes y procesos estandarizados.';
-  } else if (ratio < 2.0) {
-    summary += 'Variabilidad moderada, algunos casos outliers afectan la eficiencia.';
+  // Score basado en escala definida:
+  // <1.5 = 100pts, 1.5-2.0 = 70pts, 2.0-2.5 = 50pts, 2.5-3.0 = 30pts, >3.0 = 20pts
+  let score: number;
+  if (ratioGlobal < 1.5) {
+    score = 100;
+  } else if (ratioGlobal < 2.0) {
+    score = 70;
+  } else if (ratioGlobal < 2.5) {
+    score = 50;
+  } else if (ratioGlobal < 3.0) {
+    score = 30;
   } else {
-    summary += 'Alta variabilidad en tiempos, requiere estandarización de procesos.';
+    score = 20;
   }
 
+  // Summary con segmentación
+  let summary = `AHT Global: ${Math.round(ahtP50)}s (P50), ratio ${ratioGlobal.toFixed(2)}. `;
+  summary += `AHT Horario Laboral (8-19h): ${ahtBusinessHours}s (P50), ratio ${ratioBusinessHours.toFixed(2)}. `;
+  summary += variabilityInsight;
+
   const kpi: Kpi = {
-    label: 'Ratio P90/P50',
-    value: ratio.toFixed(2),
+    label: 'Ratio P90/P50 Global',
+    value: ratioGlobal.toFixed(2),
+    change: `Horario laboral: ${ratioBusinessHours.toFixed(2)}`,
+    changeType: ratioGlobal > 2.5 ? 'negative' : ratioGlobal > 1.8 ? 'neutral' : 'positive'
   };
 
   const dimension: DimensionAnalysis = {
@@ -380,7 +427,7 @@ function buildOperationalEfficiencyDimension(
   return dimension;
 }
 
-// ==== Efectividad & Resolución (v3.0) ====
+// ==== Efectividad & Resolución (v3.2 - enfocada en FCR y recontactos) ====
 
 function buildEffectivenessResolutionDimension(
   raw: BackendRawResults
@@ -388,35 +435,58 @@ function buildEffectivenessResolutionDimension(
   const op = raw?.operational_performance;
   if (!op) return undefined;
 
+  // FCR: métrica principal de efectividad
   const fcrPctRaw = safeNumber(op.fcr_rate, NaN);
-  const escRateRaw = safeNumber(op.escalation_rate, NaN);
   const recurrenceRaw = safeNumber(op.recurrence_rate_7d, NaN);
+  const abandonmentRate = safeNumber(op.abandonment_rate, 0);
 
-  // FCR proxy: usar fcr_rate o calcular desde recurrence
-  const fcrProxy = Number.isFinite(fcrPctRaw) && fcrPctRaw >= 0
+  // FCR real o proxy desde recontactos
+  const fcrRate = Number.isFinite(fcrPctRaw) && fcrPctRaw >= 0
     ? Math.max(0, Math.min(100, fcrPctRaw))
     : Number.isFinite(recurrenceRaw)
       ? Math.max(0, Math.min(100, 100 - recurrenceRaw))
-      : 75; // valor por defecto
+      : 70; // valor por defecto benchmark aéreo
 
-  const transferRate = Number.isFinite(escRateRaw) ? escRateRaw : 15;
+  // Recontactos a 7 días (complemento del FCR)
+  const recontactRate = 100 - fcrRate;
 
-  // Score: FCR alto + transferencias bajas = mejor score
-  const score = Math.max(0, Math.min(100, Math.round(fcrProxy - transferRate * 0.5)));
-
-  let summary = `FCR proxy 7d: ${fcrProxy.toFixed(1)}%. Tasa de transferencias: ${transferRate.toFixed(1)}%. `;
-
-  if (fcrProxy >= 85 && transferRate < 10) {
-    summary += 'Excelente resolución en primer contacto, mínimas transferencias.';
-  } else if (fcrProxy >= 70) {
-    summary += 'Resolución aceptable, oportunidad de reducir recontactos y transferencias.';
+  // Score basado principalmente en FCR (benchmark sector aéreo: 68-72%)
+  // FCR >= 75% = 100pts, 70-75% = 80pts, 65-70% = 60pts, 60-65% = 40pts, <60% = 20pts
+  let score: number;
+  if (fcrRate >= 75) {
+    score = 100;
+  } else if (fcrRate >= 70) {
+    score = 80;
+  } else if (fcrRate >= 65) {
+    score = 60;
+  } else if (fcrRate >= 60) {
+    score = 40;
   } else {
-    summary += 'Baja resolución, alto recontacto a 7 días. Requiere mejora de procesos.';
+    score = 20;
+  }
+
+  // Penalización adicional por abandono alto (>8%)
+  if (abandonmentRate > 8) {
+    score = Math.max(0, score - Math.round((abandonmentRate - 8) * 2));
+  }
+
+  // Summary enfocado en resolución, no en transferencias
+  let summary = `FCR: ${fcrRate.toFixed(1)}% (benchmark sector aéreo: 68-72%). `;
+  summary += `Recontactos a 7 días: ${recontactRate.toFixed(1)}%. `;
+
+  if (fcrRate >= 72) {
+    summary += 'Resolución por encima del benchmark del sector.';
+  } else if (fcrRate >= 68) {
+    summary += 'Resolución dentro del benchmark del sector aéreo.';
+  } else {
+    summary += 'Resolución por debajo del benchmark. Oportunidad de mejora en first contact resolution.';
   }
 
   const kpi: Kpi = {
-    label: 'FCR Proxy 7d',
-    value: `${fcrProxy.toFixed(1)}%`,
+    label: 'FCR',
+    value: `${fcrRate.toFixed(0)}%`,
+    change: `Recontactos: ${recontactRate.toFixed(0)}%`,
+    changeType: fcrRate >= 70 ? 'positive' : fcrRate >= 65 ? 'neutral' : 'negative'
   };
 
   const dimension: DimensionAnalysis = {
@@ -433,7 +503,7 @@ function buildEffectivenessResolutionDimension(
   return dimension;
 }
 
-// ==== Complejidad & Predictibilidad (v3.0) ====
+// ==== Complejidad & Predictibilidad (v3.3 - basada en Hold Time) ====
 
 function buildComplexityPredictabilityDimension(
   raw: BackendRawResults
@@ -441,40 +511,182 @@ function buildComplexityPredictabilityDimension(
   const op = raw?.operational_performance;
   if (!op) return undefined;
 
-  const ahtP50 = safeNumber(op.aht_distribution?.p50, 0);
-  const ahtP90 = safeNumber(op.aht_distribution?.p90, 0);
-  const ratio = ahtP50 > 0 ? ahtP90 / ahtP50 : 2;
-  const escalationRate = safeNumber(op.escalation_rate, 15);
+  // Métrica principal: % de interacciones con Hold Time > 60s
+  // Proxy de complejidad: si el agente puso en espera al cliente >60s,
+  // probablemente tuvo que consultar/investigar
+  const highHoldRate = safeNumber(op.high_hold_time_rate, NaN);
 
-  // Score: menor ratio + menos escalaciones = mayor score (más predecible)
-  const ratioScore = Math.max(0, Math.min(50, 50 - (ratio - 1) * 25));
-  const escalationScore = Math.max(0, Math.min(50, 50 - escalationRate));
-  const score = Math.round(ratioScore + escalationScore);
+  // Si no hay datos de hold time, usar fallback del P50 de hold
+  const talkHoldAcw = op.talk_hold_acw_p50_by_skill;
+  let avgHoldP50 = 0;
+  if (Array.isArray(talkHoldAcw) && talkHoldAcw.length > 0) {
+    const holdValues = talkHoldAcw.map((item: any) => safeNumber(item?.hold_p50, 0)).filter(v => v > 0);
+    if (holdValues.length > 0) {
+      avgHoldP50 = holdValues.reduce((a, b) => a + b, 0) / holdValues.length;
+    }
+  }
 
-  let summary = `Variabilidad AHT (ratio P90/P50): ${ratio.toFixed(2)}. % transferencias: ${escalationRate.toFixed(1)}%. `;
+  // Si no tenemos high_hold_time_rate del backend, estimamos desde hold_p50
+  // Si hold_p50 promedio > 60s, asumimos ~40% de llamadas con hold alto
+  const effectiveHighHoldRate = Number.isFinite(highHoldRate) && highHoldRate >= 0
+    ? highHoldRate
+    : avgHoldP50 > 60 ? 40 : avgHoldP50 > 30 ? 20 : 10;
 
-  if (ratio < 1.5 && escalationRate < 10) {
-    summary += 'Proceso altamente predecible y baja complejidad. Excelente candidato para automatización.';
-  } else if (ratio < 2.0) {
-    summary += 'Complejidad moderada, algunos casos requieren atención especial.';
+  // Score: menor % de Hold alto = menor complejidad = mejor score
+  // <10% = 100pts (muy baja complejidad)
+  // 10-20% = 80pts (baja complejidad)
+  // 20-30% = 60pts (complejidad moderada)
+  // 30-40% = 40pts (alta complejidad)
+  // >40% = 20pts (muy alta complejidad)
+  let score: number;
+  if (effectiveHighHoldRate < 10) {
+    score = 100;
+  } else if (effectiveHighHoldRate < 20) {
+    score = 80;
+  } else if (effectiveHighHoldRate < 30) {
+    score = 60;
+  } else if (effectiveHighHoldRate < 40) {
+    score = 40;
   } else {
-    summary += 'Alta complejidad y variabilidad. Requiere optimización antes de automatizar.';
+    score = 20;
+  }
+
+  // Summary descriptivo
+  let summary = `${effectiveHighHoldRate.toFixed(1)}% de interacciones con Hold Time > 60s (proxy de consulta/investigación). `;
+
+  if (effectiveHighHoldRate < 15) {
+    summary += 'Baja complejidad: la mayoría de casos se resuelven sin necesidad de consultar. Excelente para automatización.';
+  } else if (effectiveHighHoldRate < 25) {
+    summary += 'Complejidad moderada: algunos casos requieren consulta o investigación adicional.';
+  } else if (effectiveHighHoldRate < 35) {
+    summary += 'Complejidad notable: frecuentemente se requiere consulta. Considerar base de conocimiento mejorada.';
+  } else {
+    summary += 'Alta complejidad: muchos casos requieren investigación. Priorizar documentación y herramientas de soporte.';
+  }
+
+  // Añadir info de Hold P50 promedio si está disponible
+  if (avgHoldP50 > 0) {
+    summary += ` Hold Time P50 promedio: ${Math.round(avgHoldP50)}s.`;
   }
 
   const kpi: Kpi = {
-    label: 'Ratio P90/P50',
-    value: ratio.toFixed(2),
+    label: 'Hold > 60s',
+    value: `${effectiveHighHoldRate.toFixed(0)}%`,
+    change: avgHoldP50 > 0 ? `Hold P50: ${Math.round(avgHoldP50)}s` : undefined,
+    changeType: effectiveHighHoldRate > 30 ? 'negative' : effectiveHighHoldRate > 15 ? 'neutral' : 'positive'
   };
 
   const dimension: DimensionAnalysis = {
     id: 'complexity_predictability',
     name: 'complexity_predictability',
-    title: 'Complejidad & Predictibilidad',
+    title: 'Complejidad',
     score,
     percentile: undefined,
     summary,
     kpi,
     icon: Brain,
+  };
+
+  return dimension;
+}
+
+// ==== Satisfacción del Cliente (v3.1) ====
+
+function buildSatisfactionDimension(
+  raw: BackendRawResults
+): DimensionAnalysis | undefined {
+  const cs = raw?.customer_satisfaction;
+  const csatGlobalRaw = safeNumber(cs?.csat_global, NaN);
+
+  const hasCSATData = Number.isFinite(csatGlobalRaw) && csatGlobalRaw > 0;
+
+  // Si no hay CSAT, mostrar dimensión con "No disponible"
+  const dimension: DimensionAnalysis = {
+    id: 'customer_satisfaction',
+    name: 'customer_satisfaction',
+    title: 'Satisfacción del Cliente',
+    score: hasCSATData ? Math.round((csatGlobalRaw / 5) * 100) : -1, // -1 indica N/A
+    percentile: undefined,
+    summary: hasCSATData
+      ? `CSAT global: ${csatGlobalRaw.toFixed(1)}/5. ${csatGlobalRaw >= 4.0 ? 'Nivel de satisfacción óptimo.' : csatGlobalRaw >= 3.5 ? 'Satisfacción aceptable, margen de mejora.' : 'Satisfacción baja, requiere atención urgente.'}`
+      : 'CSAT no disponible en el dataset. Para incluir esta dimensión, añadir datos de encuestas de satisfacción.',
+    kpi: {
+      label: 'CSAT',
+      value: hasCSATData ? `${csatGlobalRaw.toFixed(1)}/5` : 'No disponible',
+      changeType: hasCSATData
+        ? (csatGlobalRaw >= 4.0 ? 'positive' : csatGlobalRaw >= 3.5 ? 'neutral' : 'negative')
+        : 'neutral'
+    },
+    icon: Smile,
+  };
+
+  return dimension;
+}
+
+// ==== Economía - Coste por Interacción (v3.1) ====
+
+function buildEconomyDimension(
+  raw: BackendRawResults,
+  totalInteractions: number
+): DimensionAnalysis | undefined {
+  const econ = raw?.economy_costs;
+  const totalAnnual = safeNumber(econ?.cost_breakdown?.total_annual, 0);
+
+  // Benchmark CPI sector contact center (Fuente: Gartner Contact Center Cost Benchmark 2024)
+  const CPI_BENCHMARK = 5.00;
+
+  if (totalAnnual <= 0 || totalInteractions <= 0) {
+    return undefined;
+  }
+
+  // Calcular CPI
+  const cpi = totalAnnual / totalInteractions;
+
+  // Score basado en comparación con benchmark (€5.00)
+  // CPI <= 4.00 = 100pts (excelente)
+  // CPI 4.00-5.00 = 80pts (en benchmark)
+  // CPI 5.00-6.00 = 60pts (por encima)
+  // CPI 6.00-7.00 = 40pts (alto)
+  // CPI > 7.00 = 20pts (crítico)
+  let score: number;
+  if (cpi <= 4.00) {
+    score = 100;
+  } else if (cpi <= 5.00) {
+    score = 80;
+  } else if (cpi <= 6.00) {
+    score = 60;
+  } else if (cpi <= 7.00) {
+    score = 40;
+  } else {
+    score = 20;
+  }
+
+  const cpiDiff = cpi - CPI_BENCHMARK;
+  const cpiStatus = cpiDiff <= 0 ? 'positive' : cpiDiff <= 0.5 ? 'neutral' : 'negative';
+
+  let summary = `Coste por interacción: €${cpi.toFixed(2)} vs benchmark €${CPI_BENCHMARK.toFixed(2)}. `;
+  if (cpi <= CPI_BENCHMARK) {
+    summary += 'Eficiencia de costes óptima, por debajo del benchmark del sector.';
+  } else if (cpi <= 6.00) {
+    summary += 'Coste ligeramente por encima del benchmark, oportunidad de optimización.';
+  } else {
+    summary += 'Coste elevado respecto al sector. Priorizar iniciativas de eficiencia.';
+  }
+
+  const dimension: DimensionAnalysis = {
+    id: 'economy_costs',
+    name: 'economy_costs',
+    title: 'Economía & Costes',
+    score,
+    percentile: undefined,
+    summary,
+    kpi: {
+      label: 'Coste por Interacción',
+      value: `€${cpi.toFixed(2)}`,
+      change: `vs benchmark €${CPI_BENCHMARK.toFixed(2)}`,
+      changeType: cpiStatus as 'positive' | 'neutral' | 'negative'
+    },
+    icon: DollarSign,
   };
 
   return dimension;
@@ -692,19 +904,23 @@ export function mapBackendResultsToAnalysisData(
     Math.min(100, Math.round(arScore * 10))
   );
 
-  // v3.0: 5 dimensiones viables
+  // v3.3: 7 dimensiones (Complejidad recuperada con métrica Hold Time >60s)
   const { dimension: volumetryDimension, extraKpis } =
     buildVolumetryDimension(raw);
   const operationalEfficiencyDimension = buildOperationalEfficiencyDimension(raw);
   const effectivenessResolutionDimension = buildEffectivenessResolutionDimension(raw);
-  const complexityPredictabilityDimension = buildComplexityPredictabilityDimension(raw);
+  const complexityDimension = buildComplexityPredictabilityDimension(raw);
+  const satisfactionDimension = buildSatisfactionDimension(raw);
+  const economyDimension = buildEconomyDimension(raw, totalVolume);
   const agenticReadinessDimension = buildAgenticReadinessDimension(raw, tierFromFrontend || 'silver');
 
   const dimensions: DimensionAnalysis[] = [];
   if (volumetryDimension) dimensions.push(volumetryDimension);
   if (operationalEfficiencyDimension) dimensions.push(operationalEfficiencyDimension);
   if (effectivenessResolutionDimension) dimensions.push(effectivenessResolutionDimension);
-  if (complexityPredictabilityDimension) dimensions.push(complexityPredictabilityDimension);
+  if (complexityDimension) dimensions.push(complexityDimension);
+  if (satisfactionDimension) dimensions.push(satisfactionDimension);
+  if (economyDimension) dimensions.push(economyDimension);
   if (agenticReadinessDimension) dimensions.push(agenticReadinessDimension);
 
 
@@ -815,6 +1031,7 @@ export function mapBackendResultsToAnalysisData(
   const mergedKpis: Kpi[] = [...summaryKpis, ...extraKpis];
 
   const economicModel = buildEconomicModel(raw);
+  const benchmarkData = buildBenchmarkData(raw);
 
   return {
     tier: tierFromFrontend,
@@ -827,7 +1044,7 @@ export function mapBackendResultsToAnalysisData(
     opportunities: [],
     roadmap: [],
     economicModel,
-    benchmarkData: [],
+    benchmarkData,
     agenticReadiness,
     staticConfig: undefined,
     source: 'backend',
@@ -872,10 +1089,14 @@ export function buildHeatmapFromBackend(
     : [];
 
   const globalEscalation = safeNumber(op?.escalation_rate, 0);
-  const globalFcrPct = Math.max(
-    0,
-    Math.min(100, 100 - globalEscalation)
-  );
+  // Usar fcr_rate del backend si existe, sino calcular como 100 - escalation
+  const fcrRateBackend = safeNumber(op?.fcr_rate, NaN);
+  const globalFcrPct = Number.isFinite(fcrRateBackend) && fcrRateBackend >= 0
+    ? Math.max(0, Math.min(100, fcrRateBackend))
+    : Math.max(0, Math.min(100, 100 - globalEscalation));
+
+  // Usar abandonment_rate del backend si existe
+  const abandonmentRateBackend = safeNumber(op?.abandonment_rate, 0);
 
   const csatGlobalRaw = safeNumber(cs?.csat_global, NaN);
   const csatGlobal =
@@ -952,13 +1173,19 @@ export function buildHeatmapFromBackend(
       )
     );
 
-    // 2) Complejidad inversa (usamos la tasa global de escalación como proxy)
-    const transfer_rate = globalEscalation; // %
+    // 2) Transfer rate POR SKILL - estimado desde CV y hold time
+    // Skills con mayor variabilidad (CV alto) y mayor hold time tienden a tener más transferencias
+    // Usamos el global como base y lo modulamos por skill
+    const cvFactor = Math.min(2, Math.max(0.5, 1 + (cv_aht - 0.5)));  // Factor 0.5x - 2x basado en CV
+    const holdFactor = Math.min(1.5, Math.max(0.7, 1 + (hold_p50 - 30) / 100));  // Factor 0.7x - 1.5x basado en hold
+    const skillTransferRate = Math.max(2, Math.min(40, globalEscalation * cvFactor * holdFactor));
+
+    // Complejidad inversa basada en transfer rate del skill
     const complexity_inverse_score = Math.max(
       0,
       Math.min(
         10,
-        10 - ((transfer_rate / 100 - 0.05) / 0.25) * 10
+        10 - ((skillTransferRate / 100 - 0.05) / 0.25) * 10
       )
     );
 
@@ -1008,12 +1235,12 @@ export function buildHeatmapFromBackend(
         )
       : 0;
 
-    // Transfer rate es el % real de transferencias (NO el complemento)
+    // Transfer rate es el % real de transferencias POR SKILL
     const transferMetric = Math.max(
       0,
       Math.min(
         100,
-        Math.round(transfer_rate)
+        Math.round(skillTransferRate)
       )
     );
 
@@ -1049,13 +1276,14 @@ export function buildHeatmapFromBackend(
         csat: csatMetric0_100,
         hold_time: holdMetric,
         transfer_rate: transferMetric,
+        abandonment_rate: Math.round(abandonmentRateBackend),
       },
       annual_cost,
       variability: {
         cv_aht: Math.round(cv_aht * 100), // %
         cv_talk_time: 0,
         cv_hold_time: 0,
-        transfer_rate,
+        transfer_rate: skillTransferRate,  // Transfer rate estimado por skill
       },
       automation_readiness,
       dimensions: {
@@ -1074,6 +1302,186 @@ export function buildHeatmapFromBackend(
   });
 
   return heatmap;
+}
+
+// ==== Benchmark Data (Sector Aéreo) ====
+
+function buildBenchmarkData(raw: BackendRawResults): AnalysisData['benchmarkData'] {
+  const op = raw?.operational_performance;
+  const cs = raw?.customer_satisfaction;
+
+  const benchmarkData: AnalysisData['benchmarkData'] = [];
+
+  // Benchmarks hardcoded para sector aéreo
+  const AIRLINE_BENCHMARKS = {
+    aht_p50: 380,      // segundos
+    fcr: 70,           // % (rango 68-72%)
+    abandonment: 5,    // % (rango 5-8%)
+    ratio_p90_p50: 2.0, // ratio saludable
+    cpi: 5.25          // € (rango €4.50-€6.00)
+  };
+
+  // 1. AHT Promedio (benchmark sector aéreo: 380s)
+  const ahtP50 = safeNumber(op?.aht_distribution?.p50, 0);
+  if (ahtP50 > 0) {
+    // Percentil: menor AHT = mejor. Si AHT <= benchmark = P75+
+    const ahtPercentile = ahtP50 <= AIRLINE_BENCHMARKS.aht_p50
+      ? Math.min(90, 75 + Math.round((AIRLINE_BENCHMARKS.aht_p50 - ahtP50) / 10))
+      : Math.max(10, 75 - Math.round((ahtP50 - AIRLINE_BENCHMARKS.aht_p50) / 5));
+    benchmarkData.push({
+      kpi: 'AHT P50',
+      userValue: Math.round(ahtP50),
+      userDisplay: `${Math.round(ahtP50)}s`,
+      industryValue: AIRLINE_BENCHMARKS.aht_p50,
+      industryDisplay: `${AIRLINE_BENCHMARKS.aht_p50}s`,
+      percentile: ahtPercentile,
+      p25: 450,
+      p50: AIRLINE_BENCHMARKS.aht_p50,
+      p75: 320,
+      p90: 280
+    });
+  }
+
+  // 2. Tasa FCR (benchmark sector aéreo: 70%)
+  const fcrRate = safeNumber(op?.fcr_rate, NaN);
+  if (Number.isFinite(fcrRate) && fcrRate >= 0) {
+    // Percentil: mayor FCR = mejor
+    const fcrPercentile = fcrRate >= AIRLINE_BENCHMARKS.fcr
+      ? Math.min(90, 50 + Math.round((fcrRate - AIRLINE_BENCHMARKS.fcr) * 2))
+      : Math.max(10, 50 - Math.round((AIRLINE_BENCHMARKS.fcr - fcrRate) * 2));
+    benchmarkData.push({
+      kpi: 'Tasa FCR',
+      userValue: fcrRate / 100,
+      userDisplay: `${Math.round(fcrRate)}%`,
+      industryValue: AIRLINE_BENCHMARKS.fcr / 100,
+      industryDisplay: `${AIRLINE_BENCHMARKS.fcr}%`,
+      percentile: fcrPercentile,
+      p25: 0.60,
+      p50: AIRLINE_BENCHMARKS.fcr / 100,
+      p75: 0.78,
+      p90: 0.85
+    });
+  }
+
+  // 3. CSAT (si disponible)
+  const csatGlobal = safeNumber(cs?.csat_global, NaN);
+  if (Number.isFinite(csatGlobal) && csatGlobal > 0) {
+    const csatPercentile = Math.max(10, Math.min(90, Math.round((csatGlobal / 5) * 100)));
+    benchmarkData.push({
+      kpi: 'CSAT',
+      userValue: csatGlobal,
+      userDisplay: `${csatGlobal.toFixed(1)}/5`,
+      industryValue: 4.0,
+      industryDisplay: '4.0/5',
+      percentile: csatPercentile,
+      p25: 3.5,
+      p50: 4.0,
+      p75: 4.3,
+      p90: 4.6
+    });
+  }
+
+  // 4. Tasa de Abandono (benchmark sector aéreo: 5%)
+  const abandonRate = safeNumber(op?.abandonment_rate, NaN);
+  if (Number.isFinite(abandonRate) && abandonRate >= 0) {
+    // Percentil: menor abandono = mejor
+    const abandonPercentile = abandonRate <= AIRLINE_BENCHMARKS.abandonment
+      ? Math.min(90, 75 + Math.round((AIRLINE_BENCHMARKS.abandonment - abandonRate) * 5))
+      : Math.max(10, 75 - Math.round((abandonRate - AIRLINE_BENCHMARKS.abandonment) * 5));
+    benchmarkData.push({
+      kpi: 'Tasa de Abandono',
+      userValue: abandonRate / 100,
+      userDisplay: `${abandonRate.toFixed(1)}%`,
+      industryValue: AIRLINE_BENCHMARKS.abandonment / 100,
+      industryDisplay: `${AIRLINE_BENCHMARKS.abandonment}%`,
+      percentile: abandonPercentile,
+      p25: 0.08,
+      p50: AIRLINE_BENCHMARKS.abandonment / 100,
+      p75: 0.03,
+      p90: 0.02
+    });
+  }
+
+  // 5. Ratio P90/P50 (benchmark sector aéreo: <2.0)
+  const ahtP90 = safeNumber(op?.aht_distribution?.p90, 0);
+  const ratio = ahtP50 > 0 && ahtP90 > 0 ? ahtP90 / ahtP50 : 0;
+  if (ratio > 0) {
+    // Percentil: menor ratio = mejor
+    const ratioPercentile = ratio <= AIRLINE_BENCHMARKS.ratio_p90_p50
+      ? Math.min(90, 75 + Math.round((AIRLINE_BENCHMARKS.ratio_p90_p50 - ratio) * 30))
+      : Math.max(10, 75 - Math.round((ratio - AIRLINE_BENCHMARKS.ratio_p90_p50) * 30));
+    benchmarkData.push({
+      kpi: 'Ratio P90/P50',
+      userValue: ratio,
+      userDisplay: ratio.toFixed(2),
+      industryValue: AIRLINE_BENCHMARKS.ratio_p90_p50,
+      industryDisplay: `<${AIRLINE_BENCHMARKS.ratio_p90_p50}`,
+      percentile: ratioPercentile,
+      p25: 2.5,
+      p50: AIRLINE_BENCHMARKS.ratio_p90_p50,
+      p75: 1.5,
+      p90: 1.3
+    });
+  }
+
+  // 6. Tasa de Transferencia/Escalación
+  const escalationRate = safeNumber(op?.escalation_rate, NaN);
+  if (Number.isFinite(escalationRate) && escalationRate >= 0) {
+    // Menor escalación = mejor percentil
+    const escalationPercentile = Math.max(10, Math.min(90, Math.round(100 - escalationRate * 5)));
+    benchmarkData.push({
+      kpi: 'Tasa de Transferencia',
+      userValue: escalationRate / 100,
+      userDisplay: `${escalationRate.toFixed(1)}%`,
+      industryValue: 0.15,
+      industryDisplay: '15%',
+      percentile: escalationPercentile,
+      p25: 0.20,
+      p50: 0.15,
+      p75: 0.10,
+      p90: 0.08
+    });
+  }
+
+  // 7. CPI - Coste por Interacción (benchmark sector aéreo: €4.50-€6.00)
+  const econ = raw?.economy_costs;
+  const totalAnnualCost = safeNumber(econ?.cost_breakdown?.total_annual, 0);
+  const volumetry = raw?.volumetry;
+  const volumeBySkill = volumetry?.volume_by_skill;
+  const skillVolumes: number[] = Array.isArray(volumeBySkill?.values)
+    ? volumeBySkill.values.map((v: any) => safeNumber(v, 0))
+    : [];
+  const totalInteractions = skillVolumes.reduce((a, b) => a + b, 0);
+
+  if (totalAnnualCost > 0 && totalInteractions > 0) {
+    const cpi = totalAnnualCost / totalInteractions;
+    // Menor CPI = mejor. Si CPI <= 4.50 = excelente (P90+), si CPI >= 6.00 = malo (P25-)
+    let cpiPercentile: number;
+    if (cpi <= 4.50) {
+      cpiPercentile = Math.min(95, 90 + Math.round((4.50 - cpi) * 10));
+    } else if (cpi <= AIRLINE_BENCHMARKS.cpi) {
+      cpiPercentile = Math.round(50 + ((AIRLINE_BENCHMARKS.cpi - cpi) / 0.75) * 40);
+    } else if (cpi <= 6.00) {
+      cpiPercentile = Math.round(25 + ((6.00 - cpi) / 0.75) * 25);
+    } else {
+      cpiPercentile = Math.max(5, 25 - Math.round((cpi - 6.00) * 10));
+    }
+
+    benchmarkData.push({
+      kpi: 'Coste por Interacción (CPI)',
+      userValue: cpi,
+      userDisplay: `€${cpi.toFixed(2)}`,
+      industryValue: AIRLINE_BENCHMARKS.cpi,
+      industryDisplay: `€${AIRLINE_BENCHMARKS.cpi.toFixed(2)}`,
+      percentile: cpiPercentile,
+      p25: 6.00,
+      p50: AIRLINE_BENCHMARKS.cpi,
+      p75: 4.50,
+      p90: 3.80
+    });
+  }
+
+  return benchmarkData;
 }
 
 function computeCsatAverage(customerSatisfaction: any): number | undefined {

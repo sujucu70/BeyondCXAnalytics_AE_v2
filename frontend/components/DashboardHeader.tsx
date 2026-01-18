@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { LayoutDashboard, Layers, Bot, Map } from 'lucide-react';
+import { formatDateMonthYear } from '../utils/formatters';
 
 export type TabId = 'executive' | 'dimensions' | 'readiness' | 'roadmap';
 
@@ -22,15 +23,6 @@ const TABS: TabConfig[] = [
   { id: 'roadmap', label: 'Roadmap', icon: Map },
 ];
 
-const formatDate = (): string => {
-  const now = new Date();
-  const months = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-  ];
-  return `${months[now.getMonth()]} ${now.getFullYear()}`;
-};
-
 export function DashboardHeader({
   title = 'AIR EUROPA - Beyond CX Analytics',
   activeTab,
@@ -39,15 +31,15 @@ export function DashboardHeader({
   return (
     <header className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
       {/* Top row: Title and Date */}
-      <div className="max-w-7xl mx-auto px-6 py-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-slate-800">{title}</h1>
-          <span className="text-sm text-slate-500">{formatDate()}</span>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-base sm:text-xl font-bold text-slate-800 truncate">{title}</h1>
+          <span className="text-xs sm:text-sm text-slate-500 flex-shrink-0">{formatDateMonthYear()}</span>
         </div>
       </div>
 
       {/* Tab Navigation */}
-      <nav className="max-w-7xl mx-auto px-6">
+      <nav className="max-w-7xl mx-auto px-2 sm:px-6 overflow-x-auto">
         <div className="flex space-x-1">
           {TABS.map((tab) => {
             const Icon = tab.icon;
