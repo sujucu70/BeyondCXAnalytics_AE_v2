@@ -99,6 +99,15 @@ class EconomyCostMetrics:
             + df["wrap_up_time"].fillna(0)
         )  # segundos
 
+        # Filtrar por record_status para cálculos de AHT/CPI
+        # Solo incluir registros VALID (excluir NOISE, ZOMBIE, ABANDON)
+        if "record_status" in df.columns:
+            df["record_status"] = df["record_status"].astype(str).str.strip().str.upper()
+            df["_is_valid_for_cost"] = df["record_status"] == "VALID"
+        else:
+            # Legacy data sin record_status: incluir todo
+            df["_is_valid_for_cost"] = True
+
         self.df = df
 
     @property
@@ -115,12 +124,19 @@ class EconomyCostMetrics:
         """
         CPI (Coste Por Interacción) por skill/canal.
 
-        CPI = Labor_cost_per_interaction + Overhead_variable
+        CPI = (Labor_cost_per_interaction + Overhead_variable) / EFFECTIVE_PRODUCTIVITY
 
         - Labor_cost_per_interaction = (labor_cost_per_hour * AHT_hours)
         - Overhead_variable = overhead_rate * Labor_cost_per_interaction
+        - EFFECTIVE_PRODUCTIVITY = 0.70 (70% - accounts for non-productive time)
+
+        Excluye registros abandonados del cálculo de costes para consistencia
+        con el path del frontend (fresh CSV).
 
         Si no hay config de costes -> devuelve DataFrame vacío.
+
+        Incluye queue_skill y channel como columnas (no solo índice) para que
+        el frontend pueda hacer lookup por nombre de skill.
         """
         if not self._has_cost_config():
             return pd.DataFrame()
@@ -132,8 +148,22 @@ class EconomyCostMetrics:
         if df.empty:
             return pd.DataFrame()
 
-        # AHT por skill/canal (en segundos)
-        grouped = df.groupby(["queue_skill", "channel"])["handle_time"].mean()
+        # Filter out abandonments for cost calculation (consistency with frontend)
+        if "is_abandoned" in df.columns:
+            df_cost = df[df["is_abandoned"] != True]
+        else:
+            df_cost = df
+
+        # Filtrar por record_status: solo VALID para cálculo de AHT
+        # Excluye NOISE, ZOMBIE, ABANDON
+        if "_is_valid_for_cost" in df_cost.columns:
+            df_cost = df_cost[df_cost["_is_valid_for_cost"] == True]
+
+        if df_cost.empty:
+            return pd.DataFrame()
+
+        # AHT por skill/canal (en segundos) - solo registros VALID
+        grouped = df_cost.groupby(["queue_skill", "channel"])["handle_time"].mean()
 
         if grouped.empty:
             return pd.DataFrame()
@@ -141,9 +171,14 @@ class EconomyCostMetrics:
         aht_sec = grouped
         aht_hours = aht_sec / 3600.0
 
+        # Apply productivity factor (70% effectiveness)
+        # This accounts for non-productive agent time (breaks, training, etc.)
+        EFFECTIVE_PRODUCTIVITY = 0.70
+
         labor_cost = cfg.labor_cost_per_hour * aht_hours
         overhead = labor_cost * cfg.overhead_rate
-        cpi = labor_cost + overhead
+        raw_cpi = labor_cost + overhead
+        cpi = raw_cpi / EFFECTIVE_PRODUCTIVITY
 
         out = pd.DataFrame(
             {
@@ -154,7 +189,8 @@ class EconomyCostMetrics:
             }
         )
 
-        return out.sort_index()
+        # Reset index to include queue_skill and channel as columns for frontend lookup
+        return out.sort_index().reset_index()
 
     # ------------------------------------------------------------------ #
     # KPI 2: coste anual por skill/canal
@@ -180,7 +216,9 @@ class EconomyCostMetrics:
             .rename("volume")
         )
 
-        joined = cpi_table.join(volume, how="left").fillna({"volume": 0})
+        # Set index on cpi_table to match volume's MultiIndex for join
+        cpi_indexed = cpi_table.set_index(["queue_skill", "channel"])
+        joined = cpi_indexed.join(volume, how="left").fillna({"volume": 0})
         joined["annual_cost"] = (joined["cpi_total"] * joined["volume"]).round(2)
 
         return joined
@@ -216,7 +254,9 @@ class EconomyCostMetrics:
             .rename("volume")
         )
 
-        joined = cpi_table.join(volume, how="left").fillna({"volume": 0})
+        # Set index on cpi_table to match volume's MultiIndex for join
+        cpi_indexed = cpi_table.set_index(["queue_skill", "channel"])
+        joined = cpi_indexed.join(volume, how="left").fillna({"volume": 0})
 
         # Costes anuales de labor y overhead
         annual_labor = (joined["labor_cost"] * joined["volume"]).sum()
@@ -252,7 +292,7 @@ class EconomyCostMetrics:
           - Ineff_seconds = Delta * volume * 0.4
           - Ineff_cost = LaborCPI_per_second * Ineff_seconds
 
-        ⚠️ Es un modelo aproximado para cuantificar "orden de magnitud".
+        NOTA: Es un modelo aproximado para cuantificar "orden de magnitud".
         """
         if not self._has_cost_config():
             return pd.DataFrame()
@@ -261,6 +301,12 @@ class EconomyCostMetrics:
         assert cfg is not None
 
         df = self.df.copy()
+
+        # Filtrar por record_status: solo VALID para cálculo de AHT
+        # Excluye NOISE, ZOMBIE, ABANDON
+        if "_is_valid_for_cost" in df.columns:
+            df = df[df["_is_valid_for_cost"] == True]
+
         grouped = df.groupby(["queue_skill", "channel"])
 
         stats = grouped["handle_time"].agg(
@@ -273,9 +319,13 @@ class EconomyCostMetrics:
             return pd.DataFrame()
 
         # CPI para obtener coste/segundo de labor
-        cpi_table = self.cpi_by_skill_channel()
-        if cpi_table.empty:
+        # cpi_by_skill_channel now returns with reset_index, so we need to set index for join
+        cpi_table_raw = self.cpi_by_skill_channel()
+        if cpi_table_raw.empty:
             return pd.DataFrame()
+
+        # Set queue_skill+channel as index for the join
+        cpi_table = cpi_table_raw.set_index(["queue_skill", "channel"])
 
         merged = stats.join(cpi_table[["labor_cost"]], how="left")
         merged = merged.fillna(0.0)
@@ -297,7 +347,8 @@ class EconomyCostMetrics:
         merged["ineff_seconds"] = ineff_seconds.round(2)
         merged["ineff_cost"] = ineff_cost
 
-        return merged[["aht_p50", "aht_p90", "volume", "ineff_seconds", "ineff_cost"]]
+        # Reset index to include queue_skill and channel as columns for frontend lookup
+        return merged[["aht_p50", "aht_p90", "volume", "ineff_seconds", "ineff_cost"]].reset_index()
 
     # ------------------------------------------------------------------ #
     # KPI 5: ahorro potencial anual por automatización
@@ -419,7 +470,9 @@ class EconomyCostMetrics:
             .rename("volume")
         )
 
-        joined = cpi_table.join(volume, how="left").fillna({"volume": 0})
+        # Set index on cpi_table to match volume's MultiIndex for join
+        cpi_indexed = cpi_table.set_index(["queue_skill", "channel"])
+        joined = cpi_indexed.join(volume, how="left").fillna({"volume": 0})
 
         # CPI medio ponderado por canal
         per_channel = (

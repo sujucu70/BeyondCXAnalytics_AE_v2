@@ -96,7 +96,8 @@ export interface OriginalQueueMetrics {
   aht_mean: number;           // AHT promedio (segundos)
   cv_aht: number;             // CV AHT calculado solo sobre VALID (%)
   transfer_rate: number;      // Tasa de transferencia (%)
-  fcr_rate: number;           // FCR (%)
+  fcr_rate: number;           // FCR Real (%) - usa fcr_real_flag, incluye filtro recontacto 7d
+  fcr_tecnico: number;        // FCR Técnico (%) = 100 - transfer_rate, comparable con benchmarks
   agenticScore: number;       // Score de automatización (0-10)
   scoreBreakdown?: AgenticScoreBreakdown;  // v3.4: Desglose por factores
   tier: AgenticTier;          // v3.4: Clasificación para roadmap
@@ -115,7 +116,8 @@ export interface DrilldownDataPoint {
   aht_mean: number;           // AHT promedio ponderado (segundos)
   cv_aht: number;             // CV AHT promedio ponderado (%)
   transfer_rate: number;      // Tasa de transferencia ponderada (%)
-  fcr_rate: number;           // FCR ponderado (%)
+  fcr_rate: number;           // FCR Real ponderado (%) - usa fcr_real_flag
+  fcr_tecnico: number;        // FCR Técnico ponderado (%) = 100 - transfer_rate
   agenticScore: number;       // Score de automatización promedio (0-10)
   isPriorityCandidate: boolean;  // Al menos una cola con CV < 75%
   annualCost?: number;        // Coste anual total del grupo
@@ -128,7 +130,9 @@ export interface SkillMetrics {
   channel: string;            // Canal predominante
 
   // Métricas de rendimiento (calculadas)
-  fcr: number;                // FCR aproximado: 100% - transfer_rate
+  fcr: number;                // FCR Real: (transfer_flag == FALSE) AND (repeat_call_7d == FALSE) - sin recontacto 7 días
+  fcr_tecnico: number;        // FCR Técnico: 100% - transfer_rate (comparable con benchmarks de industria)
+  fcr_real: number;           // Alias de fcr - FCR Real con filtro de recontacto 7 días
   aht: number;                // AHT = duration_talk + hold_time + wrap_up_time
   avg_talk_time: number;      // Promedio duration_talk
   avg_hold_time: number;      // Promedio hold_time
@@ -205,16 +209,21 @@ export interface HeatmapDataPoint {
   skill: string;
   segment?: CustomerSegment;  // Segmento de cliente (high/medium/low)
   volume: number;  // Volumen mensual de interacciones
-  aht_seconds: number;  // AHT en segundos (para cálculo de coste)
+  cost_volume?: number;  // Volumen usado para calcular coste (non-abandon)
+  aht_seconds: number;  // AHT "limpio" en segundos (solo valid, excluye noise/zombie/abandon) - para métricas de calidad
+  aht_total?: number;  // AHT "total" en segundos (ALL rows incluyendo noise/zombie/abandon) - solo informativo
+  aht_benchmark?: number;  // AHT "tradicional" en segundos (incluye noise, excluye zombie/abandon) - para comparación con benchmarks de industria
   metrics: {
-    fcr: number;    // First Contact Resolution score (0-100) - CALCULADO
+    fcr: number;    // FCR Real: sin transferencia Y sin recontacto 7 días (0-100) - CALCULADO
+    fcr_tecnico?: number;  // FCR Técnico: sin transferencia (comparable con benchmarks industria)
     aht: number;    // Average Handle Time score (0-100, donde 100 es óptimo) - CALCULADO
     csat: number;   // Customer Satisfaction score (0-100) - MANUAL (estático)
     hold_time: number;  // Hold Time promedio (segundos) - CALCULADO
     transfer_rate: number;  // % transferencias - CALCULADO
     abandonment_rate: number;  // % abandonos - CALCULADO
   };
-  annual_cost?: number;  // Coste anual en euros (calculado con cost_per_hour)
+  annual_cost?: number;  // Coste total del período (calculado con cost_per_hour)
+  cpi?: number;  // Coste por interacción = total_cost / cost_volume
   
   // v2.0: Métricas de variabilidad interna
   variability: {

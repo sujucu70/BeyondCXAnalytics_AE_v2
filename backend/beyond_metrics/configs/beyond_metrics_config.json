@@ -20,6 +20,7 @@
       "metrics": [
         "aht_distribution",
         "talk_hold_acw_p50_by_skill",
+        "metrics_by_skill",
         "fcr_rate",
         "escalation_rate",
         "abandonment_rate",

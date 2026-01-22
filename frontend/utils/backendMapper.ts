@@ -7,6 +7,8 @@ import type {
   DimensionAnalysis,
   Kpi,
   EconomicModelData,
+  Finding,
+  Recommendation,
 } from '../types';
 import type { BackendRawResults } from './apiClient';
 import { BarChartHorizontal, Zap, Target, Brain, Bot, Smile, DollarSign } from 'lucide-react';
@@ -290,6 +292,7 @@ function buildVolumetryDimension(
   const maxHourly = validHourly.length > 0 ? Math.max(...validHourly) : 0;
   const minHourly = validHourly.length > 0 ? Math.min(...validHourly) : 1;
   const peakValleyRatio = minHourly > 0 ? maxHourly / minHourly : 1;
+  console.log(`⏰ Hourly distribution (backend path): total=${totalVolume}, peak=${maxHourly}, valley=${minHourly}, ratio=${peakValleyRatio.toFixed(2)}`);
 
   // Score basado en:
   // - % fuera de horario (>30% penaliza)
@@ -406,11 +409,12 @@ function buildOperationalEfficiencyDimension(
   summary += `AHT Horario Laboral (8-19h): ${ahtBusinessHours}s (P50), ratio ${ratioBusinessHours.toFixed(2)}. `;
   summary += variabilityInsight;
 
+  // KPI principal: AHT P50 (industry standard for operational efficiency)
   const kpi: Kpi = {
-    label: 'Ratio P90/P50 Global',
-    value: ratioGlobal.toFixed(2),
-    change: `Horario laboral: ${ratioBusinessHours.toFixed(2)}`,
-    changeType: ratioGlobal > 2.5 ? 'negative' : ratioGlobal > 1.8 ? 'neutral' : 'positive'
+    label: 'AHT P50',
+    value: `${Math.round(ahtP50)}s`,
+    change: `Ratio: ${ratioGlobal.toFixed(2)}`,
+    changeType: ahtP50 > 360 ? 'negative' : ahtP50 > 300 ? 'neutral' : 'positive'
   };
 
   const dimension: DimensionAnalysis = {
@@ -427,7 +431,7 @@ function buildOperationalEfficiencyDimension(
   return dimension;
 }
 
-// ==== Efectividad & Resolución (v3.2 - enfocada en FCR y recontactos) ====
+// ==== Efectividad & Resolución (v3.2 - enfocada en FCR Técnico) ====
 
 function buildEffectivenessResolutionDimension(
   raw: BackendRawResults
@@ -435,31 +439,29 @@ function buildEffectivenessResolutionDimension(
   const op = raw?.operational_performance;
   if (!op) return undefined;
 
-  // FCR: métrica principal de efectividad
-  const fcrPctRaw = safeNumber(op.fcr_rate, NaN);
-  const recurrenceRaw = safeNumber(op.recurrence_rate_7d, NaN);
+  // FCR Técnico = 100 - transfer_rate (comparable con benchmarks de industria)
+  // Usamos escalation_rate que es la tasa de transferencias
+  const escalationRate = safeNumber(op.escalation_rate, NaN);
   const abandonmentRate = safeNumber(op.abandonment_rate, 0);
 
-  // FCR real o proxy desde recontactos
-  const fcrRate = Number.isFinite(fcrPctRaw) && fcrPctRaw >= 0
-    ? Math.max(0, Math.min(100, fcrPctRaw))
-    : Number.isFinite(recurrenceRaw)
-      ? Math.max(0, Math.min(100, 100 - recurrenceRaw))
-      : 70; // valor por defecto benchmark aéreo
+  // FCR Técnico: 100 - tasa de transferencia
+  const fcrRate = Number.isFinite(escalationRate) && escalationRate >= 0
+    ? Math.max(0, Math.min(100, 100 - escalationRate))
+    : 70; // valor por defecto benchmark aéreo
 
-  // Recontactos a 7 días (complemento del FCR)
-  const recontactRate = 100 - fcrRate;
+  // Tasa de transferencia (complemento del FCR Técnico)
+  const transferRate = Number.isFinite(escalationRate) ? escalationRate : 100 - fcrRate;
 
-  // Score basado principalmente en FCR (benchmark sector aéreo: 68-72%)
-  // FCR >= 75% = 100pts, 70-75% = 80pts, 65-70% = 60pts, 60-65% = 40pts, <60% = 20pts
+  // Score basado en FCR Técnico (benchmark sector aéreo: 85-90%)
+  // FCR >= 90% = 100pts, 85-90% = 80pts, 80-85% = 60pts, 75-80% = 40pts, <75% = 20pts
   let score: number;
-  if (fcrRate >= 75) {
+  if (fcrRate >= 90) {
     score = 100;
-  } else if (fcrRate >= 70) {
+  } else if (fcrRate >= 85) {
     score = 80;
-  } else if (fcrRate >= 65) {
+  } else if (fcrRate >= 80) {
     score = 60;
-  } else if (fcrRate >= 60) {
+  } else if (fcrRate >= 75) {
     score = 40;
   } else {
     score = 20;
@@ -470,23 +472,23 @@ function buildEffectivenessResolutionDimension(
     score = Math.max(0, score - Math.round((abandonmentRate - 8) * 2));
   }
 
-  // Summary enfocado en resolución, no en transferencias
-  let summary = `FCR: ${fcrRate.toFixed(1)}% (benchmark sector aéreo: 68-72%). `;
-  summary += `Recontactos a 7 días: ${recontactRate.toFixed(1)}%. `;
+  // Summary enfocado en FCR Técnico
+  let summary = `FCR Técnico: ${fcrRate.toFixed(1)}% (benchmark: 85-90%). `;
+  summary += `Tasa de transferencia: ${transferRate.toFixed(1)}%. `;
 
-  if (fcrRate >= 72) {
-    summary += 'Resolución por encima del benchmark del sector.';
-  } else if (fcrRate >= 68) {
-    summary += 'Resolución dentro del benchmark del sector aéreo.';
+  if (fcrRate >= 90) {
+    summary += 'Excelente resolución en primer contacto.';
+  } else if (fcrRate >= 85) {
+    summary += 'Resolución dentro del benchmark del sector.';
   } else {
-    summary += 'Resolución por debajo del benchmark. Oportunidad de mejora en first contact resolution.';
+    summary += 'Oportunidad de mejora reduciendo transferencias.';
   }
 
   const kpi: Kpi = {
-    label: 'FCR',
+    label: 'FCR Técnico',
     value: `${fcrRate.toFixed(0)}%`,
-    change: `Recontactos: ${recontactRate.toFixed(0)}%`,
-    changeType: fcrRate >= 70 ? 'positive' : fcrRate >= 65 ? 'neutral' : 'negative'
+    change: `Transfer: ${transferRate.toFixed(0)}%`,
+    changeType: fcrRate >= 85 ? 'positive' : fcrRate >= 80 ? 'neutral' : 'negative'
   };
 
   const dimension: DimensionAnalysis = {
@@ -503,7 +505,7 @@ function buildEffectivenessResolutionDimension(
   return dimension;
 }
 
-// ==== Complejidad & Predictibilidad (v3.3 - basada en Hold Time) ====
+// ==== Complejidad & Predictibilidad (v3.4 - basada en CV AHT per industry standards) ====
 
 function buildComplexityPredictabilityDimension(
   raw: BackendRawResults
@@ -511,12 +513,19 @@ function buildComplexityPredictabilityDimension(
   const op = raw?.operational_performance;
   if (!op) return undefined;
 
-  // Métrica principal: % de interacciones con Hold Time > 60s
-  // Proxy de complejidad: si el agente puso en espera al cliente >60s,
-  // probablemente tuvo que consultar/investigar
-  const highHoldRate = safeNumber(op.high_hold_time_rate, NaN);
+  // KPI principal: CV AHT (industry standard for predictability/WFM)
+  // CV AHT = (P90 - P50) / P50 como proxy de coeficiente de variación
+  const ahtP50 = safeNumber(op.aht_distribution?.p50, 0);
+  const ahtP90 = safeNumber(op.aht_distribution?.p90, 0);
 
-  // Si no hay datos de hold time, usar fallback del P50 de hold
+  // Calcular CV AHT como (P90-P50)/P50 (proxy del coeficiente de variación real)
+  let cvAht = 0;
+  if (ahtP50 > 0 && ahtP90 > 0) {
+    cvAht = (ahtP90 - ahtP50) / ahtP50;
+  }
+  const cvAhtPercent = Math.round(cvAht * 100);
+
+  // Hold Time como métrica secundaria de complejidad
   const talkHoldAcw = op.talk_hold_acw_p50_by_skill;
   let avgHoldP50 = 0;
   if (Array.isArray(talkHoldAcw) && talkHoldAcw.length > 0) {
@@ -526,60 +535,55 @@ function buildComplexityPredictabilityDimension(
     }
   }
 
-  // Si no tenemos high_hold_time_rate del backend, estimamos desde hold_p50
-  // Si hold_p50 promedio > 60s, asumimos ~40% de llamadas con hold alto
-  const effectiveHighHoldRate = Number.isFinite(highHoldRate) && highHoldRate >= 0
-    ? highHoldRate
-    : avgHoldP50 > 60 ? 40 : avgHoldP50 > 30 ? 20 : 10;
-
-  // Score: menor % de Hold alto = menor complejidad = mejor score
-  // <10% = 100pts (muy baja complejidad)
-  // 10-20% = 80pts (baja complejidad)
-  // 20-30% = 60pts (complejidad moderada)
-  // 30-40% = 40pts (alta complejidad)
-  // >40% = 20pts (muy alta complejidad)
+  // Score basado en CV AHT (benchmark: <75% = excelente, <100% = aceptable)
+  // CV <= 75% = 100pts (alta predictibilidad)
+  // CV 75-100% = 80pts (predictibilidad aceptable)
+  // CV 100-125% = 60pts (variabilidad moderada)
+  // CV 125-150% = 40pts (alta variabilidad)
+  // CV > 150% = 20pts (muy alta variabilidad)
   let score: number;
-  if (effectiveHighHoldRate < 10) {
+  if (cvAhtPercent <= 75) {
     score = 100;
-  } else if (effectiveHighHoldRate < 20) {
+  } else if (cvAhtPercent <= 100) {
     score = 80;
-  } else if (effectiveHighHoldRate < 30) {
+  } else if (cvAhtPercent <= 125) {
     score = 60;
-  } else if (effectiveHighHoldRate < 40) {
+  } else if (cvAhtPercent <= 150) {
     score = 40;
   } else {
     score = 20;
   }
 
   // Summary descriptivo
-  let summary = `${effectiveHighHoldRate.toFixed(1)}% de interacciones con Hold Time > 60s (proxy de consulta/investigación). `;
+  let summary = `CV AHT: ${cvAhtPercent}% (benchmark: <75%). `;
 
-  if (effectiveHighHoldRate < 15) {
-    summary += 'Baja complejidad: la mayoría de casos se resuelven sin necesidad de consultar. Excelente para automatización.';
-  } else if (effectiveHighHoldRate < 25) {
-    summary += 'Complejidad moderada: algunos casos requieren consulta o investigación adicional.';
-  } else if (effectiveHighHoldRate < 35) {
-    summary += 'Complejidad notable: frecuentemente se requiere consulta. Considerar base de conocimiento mejorada.';
+  if (cvAhtPercent <= 75) {
+    summary += 'Alta predictibilidad: tiempos de atención consistentes. Excelente para planificación WFM.';
+  } else if (cvAhtPercent <= 100) {
+    summary += 'Predictibilidad aceptable: variabilidad moderada en tiempos de atención.';
+  } else if (cvAhtPercent <= 125) {
+    summary += 'Variabilidad notable: dificulta la planificación de recursos. Considerar estandarización.';
   } else {
-    summary += 'Alta complejidad: muchos casos requieren investigación. Priorizar documentación y herramientas de soporte.';
+    summary += 'Alta variabilidad: tiempos muy dispersos. Priorizar scripts guiados y estandarización.';
   }
 
-  // Añadir info de Hold P50 promedio si está disponible
+  // Añadir info de Hold P50 promedio si está disponible (proxy de complejidad)
   if (avgHoldP50 > 0) {
-    summary += ` Hold Time P50 promedio: ${Math.round(avgHoldP50)}s.`;
+    summary += ` Hold Time P50: ${Math.round(avgHoldP50)}s.`;
   }
 
+  // KPI principal: CV AHT (predictability metric per industry standards)
   const kpi: Kpi = {
-    label: 'Hold > 60s',
-    value: `${effectiveHighHoldRate.toFixed(0)}%`,
-    change: avgHoldP50 > 0 ? `Hold P50: ${Math.round(avgHoldP50)}s` : undefined,
-    changeType: effectiveHighHoldRate > 30 ? 'negative' : effectiveHighHoldRate > 15 ? 'neutral' : 'positive'
+    label: 'CV AHT',
+    value: `${cvAhtPercent}%`,
+    change: avgHoldP50 > 0 ? `Hold: ${Math.round(avgHoldP50)}s` : undefined,
+    changeType: cvAhtPercent > 125 ? 'negative' : cvAhtPercent > 75 ? 'neutral' : 'positive'
   };
 
   const dimension: DimensionAnalysis = {
     id: 'complexity_predictability',
     name: 'complexity_predictability',
-    title: 'Complejidad',
+    title: 'Complejidad & Predictibilidad',
     score,
     percentile: undefined,
     summary,
@@ -630,6 +634,7 @@ function buildEconomyDimension(
   totalInteractions: number
 ): DimensionAnalysis | undefined {
   const econ = raw?.economy_costs;
+  const op = raw?.operational_performance;
   const totalAnnual = safeNumber(econ?.cost_breakdown?.total_annual, 0);
 
   // Benchmark CPI sector contact center (Fuente: Gartner Contact Center Cost Benchmark 2024)
@@ -639,8 +644,12 @@ function buildEconomyDimension(
     return undefined;
   }
 
-  // Calcular CPI
-  const cpi = totalAnnual / totalInteractions;
+  // Calcular cost_volume (non-abandoned) para consistencia con Executive Summary
+  const abandonmentRate = safeNumber(op?.abandonment_rate, 0) / 100;
+  const costVolume = Math.round(totalInteractions * (1 - abandonmentRate));
+
+  // Calcular CPI usando cost_volume (non-abandoned) como denominador
+  const cpi = costVolume > 0 ? totalAnnual / costVolume : totalAnnual / totalInteractions;
 
   // Score basado en comparación con benchmark (€5.00)
   // CPI <= 4.00 = 100pts (excelente)
@@ -1033,14 +1042,46 @@ export function mapBackendResultsToAnalysisData(
   const economicModel = buildEconomicModel(raw);
   const benchmarkData = buildBenchmarkData(raw);
 
+  // Generar findings y recommendations basados en volumetría
+  const findings: Finding[] = [];
+  const recommendations: Recommendation[] = [];
+
+  // Extraer offHoursPct de la dimensión de volumetría
+  const offHoursPct = volumetryDimension?.distribution_data?.off_hours_pct ?? 0;
+  const offHoursPctValue = offHoursPct * 100; // Convertir de 0-1 a 0-100
+
+  if (offHoursPctValue > 20) {
+    const offHoursVolume = Math.round(totalVolume * offHoursPctValue / 100);
+    findings.push({
+      type: offHoursPctValue > 30 ? 'critical' : 'warning',
+      title: 'Alto Volumen Fuera de Horario',
+      text: `${offHoursPctValue.toFixed(0)}% de interacciones fuera de horario (8-19h)`,
+      dimensionId: 'volumetry_distribution',
+      description: `${offHoursVolume.toLocaleString()} interacciones (${offHoursPctValue.toFixed(1)}%) ocurren fuera de horario laboral. Oportunidad ideal para implementar agentes virtuales 24/7.`,
+      impact: offHoursPctValue > 30 ? 'high' : 'medium'
+    });
+
+    const estimatedContainment = offHoursPctValue > 30 ? 60 : 45;
+    const estimatedSavings = Math.round(offHoursVolume * estimatedContainment / 100);
+    recommendations.push({
+      priority: 'high',
+      title: 'Implementar Agente Virtual 24/7',
+      text: `Desplegar agente virtual para atender ${offHoursPctValue.toFixed(0)}% de interacciones fuera de horario`,
+      description: `${offHoursVolume.toLocaleString()} interacciones ocurren fuera de horario laboral (19:00-08:00). Un agente virtual puede resolver ~${estimatedContainment}% de estas consultas automáticamente.`,
+      dimensionId: 'volumetry_distribution',
+      impact: `Potencial de contención: ${estimatedSavings.toLocaleString()} interacciones/período`,
+      timeline: '1-3 meses'
+    });
+  }
+
   return {
     tier: tierFromFrontend,
     overallHealthScore,
     summaryKpis: mergedKpis,
     dimensions,
     heatmapData: [], // el heatmap por skill lo seguimos generando en el front
-    findings: [],
-    recommendations: [],
+    findings,
+    recommendations,
     opportunities: [],
     roadmap: [],
     economicModel,
@@ -1082,11 +1123,23 @@ export function buildHeatmapFromBackend(
   const econ = raw?.economy_costs;
   const cs = raw?.customer_satisfaction;
 
-  const talkHoldAcwBySkill = Array.isArray(
+  const talkHoldAcwBySkillRaw = Array.isArray(
     op?.talk_hold_acw_p50_by_skill
   )
     ? op.talk_hold_acw_p50_by_skill
     : [];
+
+  // Crear lookup map por skill name para talk_hold_acw_p50
+  const talkHoldAcwMap = new Map<string, { talk_p50: number; hold_p50: number; acw_p50: number }>();
+  for (const item of talkHoldAcwBySkillRaw) {
+    if (item?.queue_skill) {
+      talkHoldAcwMap.set(String(item.queue_skill), {
+        talk_p50: safeNumber(item.talk_p50, 0),
+        hold_p50: safeNumber(item.hold_p50, 0),
+        acw_p50: safeNumber(item.acw_p50, 0),
+      });
+    }
+  }
 
   const globalEscalation = safeNumber(op?.escalation_rate, 0);
   // Usar fcr_rate del backend si existe, sino calcular como 100 - escalation
@@ -1097,6 +1150,71 @@ export function buildHeatmapFromBackend(
 
   // Usar abandonment_rate del backend si existe
   const abandonmentRateBackend = safeNumber(op?.abandonment_rate, 0);
+
+  // ========================================================================
+  // NUEVO: Métricas REALES por skill (transfer, abandonment, FCR)
+  // Esto elimina la estimación de transfer rate basada en CV y hold time
+  // ========================================================================
+  const metricsBySkillRaw = Array.isArray(op?.metrics_by_skill)
+    ? op.metrics_by_skill
+    : [];
+
+  // Crear lookup por nombre de skill para acceso O(1)
+  const metricsBySkillMap = new Map<string, {
+    transfer_rate: number;
+    abandonment_rate: number;
+    fcr_tecnico: number;
+    fcr_real: number;
+    aht_mean: number;  // AHT promedio del backend (solo VALID - consistente con fresh path)
+    aht_total: number;  // AHT total (ALL rows incluyendo NOISE/ZOMBIE/ABANDON) - solo informativo
+    hold_time_mean: number;  // Hold time promedio (consistente con fresh path - MEAN, no P50)
+  }>();
+
+  for (const m of metricsBySkillRaw) {
+    if (m?.skill) {
+      metricsBySkillMap.set(String(m.skill), {
+        transfer_rate: safeNumber(m.transfer_rate, NaN),
+        abandonment_rate: safeNumber(m.abandonment_rate, NaN),
+        fcr_tecnico: safeNumber(m.fcr_tecnico, NaN),
+        fcr_real: safeNumber(m.fcr_real, NaN),
+        aht_mean: safeNumber(m.aht_mean, NaN),  // AHT promedio (solo VALID)
+        aht_total: safeNumber(m.aht_total, NaN),  // AHT total (ALL rows)
+        hold_time_mean: safeNumber(m.hold_time_mean, NaN),  // Hold time promedio (MEAN)
+      });
+    }
+  }
+
+  const hasRealMetricsBySkill = metricsBySkillMap.size > 0;
+  if (hasRealMetricsBySkill) {
+    console.log('✅ Usando métricas REALES por skill del backend:', metricsBySkillMap.size, 'skills');
+  } else {
+    console.warn('⚠️ No hay metrics_by_skill del backend, usando estimación basada en CV/hold');
+  }
+
+  // ========================================================================
+  // NUEVO: CPI por skill desde cpi_by_skill_channel
+  // Esto permite que el cached path tenga CPI real como el fresh path
+  // ========================================================================
+  const cpiBySkillRaw = Array.isArray(econ?.cpi_by_skill_channel)
+    ? econ.cpi_by_skill_channel
+    : [];
+
+  // Crear lookup por nombre de skill para CPI
+  const cpiBySkillMap = new Map<string, number>();
+  for (const item of cpiBySkillRaw) {
+    if (item?.queue_skill || item?.skill) {
+      const skillKey = String(item.queue_skill ?? item.skill);
+      const cpiValue = safeNumber(item.cpi_total ?? item.cpi, NaN);
+      if (Number.isFinite(cpiValue)) {
+        cpiBySkillMap.set(skillKey, cpiValue);
+      }
+    }
+  }
+
+  const hasCpiBySkill = cpiBySkillMap.size > 0;
+  if (hasCpiBySkill) {
+    console.log('✅ Usando CPI por skill del backend:', cpiBySkillMap.size, 'skills');
+  }
 
   const csatGlobalRaw = safeNumber(cs?.csat_global, NaN);
   const csatGlobal =
@@ -1110,11 +1228,23 @@ export function buildHeatmapFromBackend(
       )
     : 0;
 
-  const ineffBySkill = Array.isArray(
+  const ineffBySkillRaw = Array.isArray(
     econ?.inefficiency_cost_by_skill_channel
   )
     ? econ.inefficiency_cost_by_skill_channel
     : [];
+
+  // Crear lookup map por skill name para inefficiency data
+  const ineffBySkillMap = new Map<string, { aht_p50: number; aht_p90: number; volume: number }>();
+  for (const item of ineffBySkillRaw) {
+    if (item?.queue_skill) {
+      ineffBySkillMap.set(String(item.queue_skill), {
+        aht_p50: safeNumber(item.aht_p50, 0),
+        aht_p90: safeNumber(item.aht_p90, 0),
+        volume: safeNumber(item.volume, 0),
+      });
+    }
+  }
 
   const COST_PER_SECOND = costPerHour / 3600;
 
@@ -1137,12 +1267,30 @@ export function buildHeatmapFromBackend(
     const skill = skillLabels[i];
     const volume = safeNumber(skillVolumes[i], 0);
 
-    const talkHold = talkHoldAcwBySkill[i] || {};
-    const talk_p50 = safeNumber(talkHold.talk_p50, 0);
-    const hold_p50 = safeNumber(talkHold.hold_p50, 0);
-    const acw_p50 = safeNumber(talkHold.acw_p50, 0);
+    // Buscar P50s por nombre de skill (no por índice)
+    const talkHold = talkHoldAcwMap.get(skill);
+    const talk_p50 = talkHold?.talk_p50 ?? 0;
+    const hold_p50 = talkHold?.hold_p50 ?? 0;
+    const acw_p50 = talkHold?.acw_p50 ?? 0;
 
-    const aht_mean = talk_p50 + hold_p50 + acw_p50;
+    // Buscar métricas REALES del backend (metrics_by_skill)
+    const realSkillMetrics = metricsBySkillMap.get(skill);
+
+    // AHT: Use ONLY aht_mean from backend metrics_by_skill
+    // NEVER use P50 sum as fallback - it's mathematically different from mean AHT
+    const aht_mean = (realSkillMetrics && Number.isFinite(realSkillMetrics.aht_mean) && realSkillMetrics.aht_mean > 0)
+      ? realSkillMetrics.aht_mean
+      : 0;
+
+    // AHT Total: AHT calculado con TODAS las filas (incluye NOISE/ZOMBIE/ABANDON)
+    // Solo para información/comparación - no se usa en cálculos
+    const aht_total = (realSkillMetrics && Number.isFinite(realSkillMetrics.aht_total) && realSkillMetrics.aht_total > 0)
+      ? realSkillMetrics.aht_total
+      : aht_mean;  // fallback to aht_mean if not available
+
+    if (aht_mean === 0) {
+      console.warn(`⚠️ No aht_mean for skill ${skill} - data may be incomplete`);
+    }
 
     // Coste anual aproximado
     const annual_volume = volume * 12;
@@ -1150,9 +1298,10 @@ export function buildHeatmapFromBackend(
       annual_volume * aht_mean * COST_PER_SECOND
     );
 
-    const ineff = ineffBySkill[i] || {};
-    const aht_p50_backend = safeNumber(ineff.aht_p50, aht_mean);
-    const aht_p90_backend = safeNumber(ineff.aht_p90, aht_mean);
+    // Buscar inefficiency data por nombre de skill (no por índice)
+    const ineff = ineffBySkillMap.get(skill);
+    const aht_p50_backend = ineff?.aht_p50 ?? aht_mean;
+    const aht_p90_backend = ineff?.aht_p90 ?? aht_mean;
 
     // Variabilidad proxy: aproximamos CV a partir de P90-P50
     let cv_aht = 0;
@@ -1173,12 +1322,36 @@ export function buildHeatmapFromBackend(
       )
     );
 
-    // 2) Transfer rate POR SKILL - estimado desde CV y hold time
-    // Skills con mayor variabilidad (CV alto) y mayor hold time tienden a tener más transferencias
-    // Usamos el global como base y lo modulamos por skill
-    const cvFactor = Math.min(2, Math.max(0.5, 1 + (cv_aht - 0.5)));  // Factor 0.5x - 2x basado en CV
-    const holdFactor = Math.min(1.5, Math.max(0.7, 1 + (hold_p50 - 30) / 100));  // Factor 0.7x - 1.5x basado en hold
-    const skillTransferRate = Math.max(2, Math.min(40, globalEscalation * cvFactor * holdFactor));
+    // 2) Transfer rate POR SKILL
+    // PRIORIDAD 1: Usar métricas REALES del backend (metrics_by_skill)
+    // PRIORIDAD 2: Fallback a estimación basada en CV y hold time
+
+    let skillTransferRate: number;
+    let skillAbandonmentRate: number;
+    let skillFcrTecnico: number;
+    let skillFcrReal: number;
+
+    if (realSkillMetrics && Number.isFinite(realSkillMetrics.transfer_rate)) {
+      // Usar métricas REALES del backend
+      skillTransferRate = realSkillMetrics.transfer_rate;
+      skillAbandonmentRate = Number.isFinite(realSkillMetrics.abandonment_rate)
+        ? realSkillMetrics.abandonment_rate
+        : abandonmentRateBackend;
+      skillFcrTecnico = Number.isFinite(realSkillMetrics.fcr_tecnico)
+        ? realSkillMetrics.fcr_tecnico
+        : 100 - skillTransferRate;
+      skillFcrReal = Number.isFinite(realSkillMetrics.fcr_real)
+        ? realSkillMetrics.fcr_real
+        : skillFcrTecnico;
+    } else {
+      // NO usar estimación - usar valores globales del backend directamente
+      // Esto asegura consistencia con el fresh path que usa valores directos del CSV
+      skillTransferRate = globalEscalation;  // Usar tasa global, sin estimación
+      skillAbandonmentRate = abandonmentRateBackend;
+      skillFcrTecnico = 100 - skillTransferRate;
+      skillFcrReal = globalFcrPct;
+      console.warn(`⚠️ No metrics_by_skill for skill ${skill} - using global rates`);
+    }
 
     // Complejidad inversa basada en transfer rate del skill
     const complexity_inverse_score = Math.max(
@@ -1221,28 +1394,17 @@ export function buildHeatmapFromBackend(
 
     // Métricas normalizadas 0-100 para el color del heatmap
     const ahtMetric = normalizeAhtMetric(aht_mean);
-;
 
-    const holdMetric = hold_p50
-      ? Math.max(
-          0,
-          Math.min(
-            100,
-            Math.round(
-              100 - (hold_p50 / 120) * 100
-            )
-          )
-        )
+    // Hold time metric: use hold_time_mean from backend (MEAN, not P50)
+    // Formula matches fresh path: 100 - (hold_time_mean / 60) * 10
+    // This gives: 0s = 100, 60s = 90, 120s = 80, etc.
+    const skillHoldTimeMean = (realSkillMetrics && Number.isFinite(realSkillMetrics.hold_time_mean))
+      ? realSkillMetrics.hold_time_mean
+      : hold_p50;  // Fallback to P50 only if no mean available
+
+    const holdMetric = skillHoldTimeMean > 0
+      ? Math.round(Math.max(0, Math.min(100, 100 - (skillHoldTimeMean / 60) * 10)))
       : 0;
-
-    // Transfer rate es el % real de transferencias POR SKILL
-    const transferMetric = Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round(skillTransferRate)
-      )
-    );
 
     // Clasificación por segmento (si nos pasan mapeo)
     let segment: CustomerSegment | undefined;
@@ -1265,25 +1427,41 @@ export function buildHeatmapFromBackend(
       }
     }
 
+    // Métricas de transferencia y FCR (ahora usando valores REALES cuando disponibles)
+    const transferMetricFinal = Math.max(0, Math.min(100, Math.round(skillTransferRate)));
+
+    // CPI should be extracted from cpi_by_skill_channel using cpi_total field
+    const skillCpiRaw = cpiBySkillMap.get(skill);
+    // Only use if it's a valid number
+    const skillCpi = (Number.isFinite(skillCpiRaw) && skillCpiRaw > 0) ? skillCpiRaw : undefined;
+
+    // cost_volume: volumen sin abandonos (para cálculo de CPI consistente)
+    // Si tenemos abandonment_rate, restamos los abandonos
+    const costVolume = Math.round(volume * (1 - skillAbandonmentRate / 100));
+
     heatmap.push({
       skill,
       segment,
       volume,
+      cost_volume: costVolume,
       aht_seconds: aht_mean,
+      aht_total: aht_total,  // AHT con TODAS las filas (solo informativo)
       metrics: {
-        fcr: Math.round(globalFcrPct),
+        fcr: Math.round(skillFcrReal),        // FCR Real (sin transfer Y sin recontacto 7d)
+        fcr_tecnico: Math.round(skillFcrTecnico),  // FCR Técnico (comparable con benchmarks)
         aht: ahtMetric,
         csat: csatMetric0_100,
         hold_time: holdMetric,
-        transfer_rate: transferMetric,
-        abandonment_rate: Math.round(abandonmentRateBackend),
+        transfer_rate: transferMetricFinal,
+        abandonment_rate: Math.round(skillAbandonmentRate),
       },
       annual_cost,
+      cpi: skillCpi,  // CPI real del backend (si disponible)
       variability: {
         cv_aht: Math.round(cv_aht * 100), // %
         cv_talk_time: 0,
         cv_hold_time: 0,
-        transfer_rate: skillTransferRate,  // Transfer rate estimado por skill
+        transfer_rate: skillTransferRate,  // Transfer rate REAL o estimado
       },
       automation_readiness,
       dimensions: {

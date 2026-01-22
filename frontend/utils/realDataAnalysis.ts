@@ -10,11 +10,24 @@ import { classifyQueue } from './segmentClassifier';
 
 /**
  * Calcular distribución horaria desde interacciones
+ * NOTA: Usa interaction_id únicos para consistencia con backend (aggfunc="nunique")
  */
 function calculateHourlyDistribution(interactions: RawInteraction[]): { hourly: number[]; off_hours_pct: number; peak_hours: number[] } {
   const hourly = new Array(24).fill(0);
 
+  // Deduplicar por interaction_id para consistencia con backend (nunique)
+  const seenIds = new Set<string>();
+  let duplicateCount = 0;
+
   for (const interaction of interactions) {
+    // Saltar duplicados de interaction_id
+    const id = interaction.interaction_id;
+    if (id && seenIds.has(id)) {
+      duplicateCount++;
+      continue;
+    }
+    if (id) seenIds.add(id);
+
     try {
       const date = new Date(interaction.datetime_start);
       if (!isNaN(date.getTime())) {
@@ -24,6 +37,10 @@ function calculateHourlyDistribution(interactions: RawInteraction[]): { hourly: 
     } catch {
       // Ignorar fechas inválidas
     }
+  }
+
+  if (duplicateCount > 0) {
+    console.log(`⏰ calculateHourlyDistribution: ${duplicateCount} interaction_ids duplicados ignorados`);
   }
 
   const total = hourly.reduce((a, b) => a + b, 0);
@@ -44,6 +61,12 @@ function calculateHourlyDistribution(interactions: RawInteraction[]): { hourly: 
     }
   }
   const peak_hours = [peakStart, peakStart + 1, peakStart + 2];
+
+  // Log para debugging
+  const hourlyNonZero = hourly.filter(v => v > 0);
+  const peakVolume = Math.max(...hourlyNonZero, 1);
+  const valleyVolume = Math.min(...hourlyNonZero.filter(v => v > 0), 1);
+  console.log(`⏰ Hourly distribution: total=${total}, peak=${peakVolume}, valley=${valleyVolume}, ratio=${(peakVolume/valleyVolume).toFixed(2)}`);
 
   return { hourly, off_hours_pct, peak_hours };
 }
@@ -124,11 +147,13 @@ export function generateAnalysisFromRealData(
   console.log(`📅 Date range: ${dateRange?.min} to ${dateRange?.max}`);
 
   // PASO 1: Analizar record_status (ya no filtramos, el filtrado se hace internamente en calculateSkillMetrics)
+  // Normalizar a uppercase para comparación case-insensitive
+  const getStatus = (i: RawInteraction) => (i.record_status || '').toString().toUpperCase().trim();
   const statusCounts = {
-    valid: interactions.filter(i => !i.record_status || i.record_status === 'valid').length,
-    noise: interactions.filter(i => i.record_status === 'noise').length,
-    zombie: interactions.filter(i => i.record_status === 'zombie').length,
-    abandon: interactions.filter(i => i.record_status === 'abandon').length
+    valid: interactions.filter(i => !i.record_status || getStatus(i) === 'VALID').length,
+    noise: interactions.filter(i => getStatus(i) === 'NOISE').length,
+    zombie: interactions.filter(i => getStatus(i) === 'ZOMBIE').length,
+    abandon: interactions.filter(i => getStatus(i) === 'ABANDON').length
   };
   console.log(`📊 Record status breakdown:`, statusCounts);
 
@@ -154,11 +179,11 @@ export function generateAnalysisFromRealData(
   const totalWeightedAHT = skillMetrics.reduce((sum, s) => sum + (s.aht_mean * s.volume_valid), 0);
   const avgAHT = totalValidInteractions > 0 ? Math.round(totalWeightedAHT / totalValidInteractions) : 0;
 
-  // FCR Real: (transfer_flag == FALSE) AND (repeat_call_7d == FALSE)
+  // FCR Técnico: 100 - transfer_rate (comparable con benchmarks de industria)
   // Ponderado por volumen de cada skill
   const totalVolumeForFCR = skillMetrics.reduce((sum, s) => sum + s.volume_valid, 0);
   const avgFCR = totalVolumeForFCR > 0
-    ? Math.round(skillMetrics.reduce((sum, s) => sum + (s.fcr_rate * s.volume_valid), 0) / totalVolumeForFCR)
+    ? Math.round(skillMetrics.reduce((sum, s) => sum + (s.fcr_tecnico * s.volume_valid), 0) / totalVolumeForFCR)
     : 0;
 
   // Coste total
@@ -168,7 +193,7 @@ export function generateAnalysisFromRealData(
   const summaryKpis: Kpi[] = [
     { label: "Interacciones Totales", value: totalInteractions.toLocaleString('es-ES') },
     { label: "AHT Promedio", value: `${avgAHT}s` },
-    { label: "Tasa FCR", value: `${avgFCR}%` },
+    { label: "FCR Técnico", value: `${avgFCR}%` },
     { label: "CSAT", value: `${(avgCsat / 20).toFixed(1)}/5` }
   ];
   
@@ -187,9 +212,9 @@ export function generateAnalysisFromRealData(
   // Agentic Readiness Score
   const agenticReadiness = calculateAgenticReadinessFromRealData(skillMetrics);
 
-  // Findings y Recommendations
-  const findings = generateFindingsFromRealData(skillMetrics, interactions);
-  const recommendations = generateRecommendationsFromRealData(skillMetrics);
+  // Findings y Recommendations (incluyendo análisis de fuera de horario)
+  const findings = generateFindingsFromRealData(skillMetrics, interactions, hourlyDistribution);
+  const recommendations = generateRecommendationsFromRealData(skillMetrics, hourlyDistribution, interactions.length);
 
   // v3.3: Drill-down por Cola + Tipificación - CALCULAR PRIMERO para usar en opportunities y roadmap
   const drilldownData = calculateDrilldownMetrics(interactions, costPerHour);
@@ -240,13 +265,18 @@ interface SkillMetrics {
   skill: string;
   volume: number;           // Total de interacciones (todas)
   volume_valid: number;     // Interacciones válidas para AHT (valid + abandon)
-  aht_mean: number;         // AHT calculado solo sobre valid (sin noise/zombie/abandon)
+  aht_mean: number;         // AHT "limpio" calculado solo sobre valid (sin noise/zombie/abandon) - para métricas de calidad, CV
+  aht_total: number;        // AHT "total" calculado con TODAS las filas (noise/zombie/abandon incluidas) - solo informativo
+  aht_benchmark: number;    // AHT "tradicional" (incluye noise, excluye zombie/abandon) - para comparación con benchmarks de industria
   aht_std: number;
   cv_aht: number;
   transfer_rate: number;    // Calculado sobre valid + abandon
-  fcr_rate: number;         // FCR real: (transfer_flag == FALSE) AND (repeat_call_7d == FALSE)
+  fcr_rate: number;         // FCR Real: (transfer_flag == FALSE) AND (repeat_call_7d == FALSE) - sin recontacto 7 días
+  fcr_tecnico: number;      // FCR Técnico: (transfer_flag == FALSE) - solo sin transferencia, comparable con benchmarks de industria
   abandonment_rate: number; // % de abandonos sobre total
   total_cost: number;       // Coste total (todas las interacciones excepto abandon)
+  cost_volume: number;      // Volumen usado para calcular coste (non-abandon)
+  cpi: number;              // Coste por interacción = total_cost / cost_volume
   hold_time_mean: number;   // Calculado sobre valid
   cv_talk_time: number;
   // Métricas adicionales para debug
@@ -255,7 +285,7 @@ interface SkillMetrics {
   abandon_count: number;
 }
 
-function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: number): SkillMetrics[] {
+export function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: number): SkillMetrics[] {
   // Agrupar por skill
   const skillGroups = new Map<string, RawInteraction[]>();
 
@@ -279,7 +309,9 @@ function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: numb
     const abandon_count = group.filter(i => i.is_abandoned === true).length;
     const abandonment_rate = (abandon_count / volume) * 100;
 
-    // FCR: DIRECTO del campo fcr_real_flag del CSV
+    // FCR Real: DIRECTO del campo fcr_real_flag del CSV
+    // Definición: (transfer_flag == FALSE) AND (repeat_call_7d == FALSE)
+    // Esta es la métrica MÁS ESTRICTA - sin transferencia Y sin recontacto en 7 días
     const fcrTrueCount = group.filter(i => i.fcr_real_flag === true).length;
     const fcr_rate = (fcrTrueCount / volume) * 100;
 
@@ -287,10 +319,17 @@ function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: numb
     const transfers = group.filter(i => i.transfer_flag === true).length;
     const transfer_rate = (transfers / volume) * 100;
 
-    // Separar por record_status para AHT
-    const noiseRecords = group.filter(i => i.record_status === 'noise');
-    const zombieRecords = group.filter(i => i.record_status === 'zombie');
-    const validRecords = group.filter(i => !i.record_status || i.record_status === 'valid');
+    // FCR Técnico: 100 - transfer_rate
+    // Definición: (transfer_flag == FALSE) - solo sin transferencia
+    // Esta métrica es COMPARABLE con benchmarks de industria (COPC, Dimension Data)
+    // Los benchmarks de industria (~70%) miden FCR sin transferencia, NO sin recontacto
+    const fcr_tecnico = 100 - transfer_rate;
+
+    // Separar por record_status para AHT (normalizar a uppercase para comparación case-insensitive)
+    const getStatus = (i: RawInteraction) => (i.record_status || '').toString().toUpperCase().trim();
+    const noiseRecords = group.filter(i => getStatus(i) === 'NOISE');
+    const zombieRecords = group.filter(i => getStatus(i) === 'ZOMBIE');
+    const validRecords = group.filter(i => !i.record_status || getStatus(i) === 'VALID');
     // Registros que generan coste (todo excepto abandonos)
     const nonAbandonRecords = group.filter(i => i.is_abandoned !== true);
 
@@ -325,6 +364,30 @@ function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: numb
       hold_time_mean = ahtRecords.reduce((sum, i) => sum + i.hold_time, 0) / volume_valid;
     }
 
+    // === AHT BENCHMARK: para comparación con benchmarks de industria ===
+    // Incluye NOISE (llamadas cortas son trabajo real), excluye ZOMBIE (errores) y ABANDON (sin handle time)
+    // Los benchmarks de industria (COPC, Dimension Data) NO filtran llamadas cortas
+    const benchmarkRecords = group.filter(i =>
+      getStatus(i) !== 'ZOMBIE' &&
+      getStatus(i) !== 'ABANDON' &&
+      i.is_abandoned !== true
+    );
+    const volume_benchmark = benchmarkRecords.length;
+
+    let aht_benchmark = aht_mean; // Fallback al AHT limpio si no hay registros benchmark
+    if (volume_benchmark > 0) {
+      const benchmarkAhts = benchmarkRecords.map(i => i.duration_talk + i.hold_time + i.wrap_up_time);
+      aht_benchmark = benchmarkAhts.reduce((sum, v) => sum + v, 0) / volume_benchmark;
+    }
+
+    // === AHT TOTAL: calculado con TODAS las filas (solo informativo) ===
+    // Incluye NOISE, ZOMBIE, ABANDON - para comparación con AHT limpio
+    let aht_total = 0;
+    if (volume > 0) {
+      const allAhts = group.map(i => i.duration_talk + i.hold_time + i.wrap_up_time);
+      aht_total = allAhts.reduce((sum, v) => sum + v, 0) / volume;
+    }
+
     // === CÁLCULOS FINANCIEROS: usar TODAS las interacciones ===
     // Coste total con productividad efectiva del 70%
     const effectiveProductivity = 0.70;
@@ -342,21 +405,29 @@ function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: numb
       aht_for_cost = costAhts.reduce((sum, v) => sum + v, 0) / costVolume;
     }
 
-    // Coste Real = (Volumen × AHT × Coste/hora) / Productividad Efectiva
+    // Coste Real = (AHT en horas × Coste/hora × Volumen) / Productividad Efectiva
     const rawCost = (aht_for_cost / 3600) * costPerHour * costVolume;
     const total_cost = rawCost / effectiveProductivity;
+
+    // CPI = Coste por interacción (usando el volumen correcto)
+    const cpi = costVolume > 0 ? total_cost / costVolume : 0;
 
     metrics.push({
       skill,
       volume,
       volume_valid,
       aht_mean,
+      aht_total,  // AHT con TODAS las filas (solo informativo)
+      aht_benchmark,
       aht_std,
       cv_aht,
       transfer_rate,
       fcr_rate,
+      fcr_tecnico,
       abandonment_rate,
       total_cost,
+      cost_volume: costVolume,
+      cpi,
       hold_time_mean,
       cv_talk_time,
       noise_count,
@@ -375,6 +446,9 @@ function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: numb
   const avgFCRRate = totalVolume > 0
     ? metrics.reduce((sum, m) => sum + m.fcr_rate * m.volume, 0) / totalVolume
     : 0;
+  const avgFCRTecnicoRate = totalVolume > 0
+    ? metrics.reduce((sum, m) => sum + m.fcr_tecnico * m.volume, 0) / totalVolume
+    : 0;
   const avgTransferRate = totalVolume > 0
     ? metrics.reduce((sum, m) => sum + m.transfer_rate * m.volume, 0) / totalVolume
     : 0;
@@ -389,12 +463,13 @@ function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: numb
   console.log('');
   console.log('MÉTRICAS GLOBALES (ponderadas por volumen):');
   console.log(`  Abandonment Rate: ${globalAbandonRate.toFixed(2)}%`);
-  console.log(`  FCR Rate (fcr_real_flag=TRUE): ${avgFCRRate.toFixed(2)}%`);
+  console.log(`  FCR Real (sin transfer + sin recontacto 7d): ${avgFCRRate.toFixed(2)}%`);
+  console.log(`  FCR Técnico (solo sin transfer, comparable con benchmarks): ${avgFCRTecnicoRate.toFixed(2)}%`);
   console.log(`  Transfer Rate: ${avgTransferRate.toFixed(2)}%`);
   console.log('');
   console.log('Detalle por skill (top 5):');
   metrics.slice(0, 5).forEach(m => {
-    console.log(`  ${m.skill}: vol=${m.volume}, abandon=${m.abandon_count} (${m.abandonment_rate.toFixed(1)}%), FCR=${m.fcr_rate.toFixed(1)}%, transfer=${m.transfer_rate.toFixed(1)}%`);
+    console.log(`  ${m.skill}: vol=${m.volume}, abandon=${m.abandon_count} (${m.abandonment_rate.toFixed(1)}%), FCR Real=${m.fcr_rate.toFixed(1)}%, FCR Técnico=${m.fcr_tecnico.toFixed(1)}%, transfer=${m.transfer_rate.toFixed(1)}%`);
   });
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('');
@@ -413,6 +488,62 @@ function calculateSkillMetrics(interactions: RawInteraction[], costPerHour: numb
   }
 
   return metrics.sort((a, b) => b.volume - a.volume); // Ordenar por volumen descendente
+}
+
+/**
+ * v4.4: Clasificar tier de automatización con datos del heatmap
+ *
+ * Esta función replica la lógica de clasificarTier() usando los datos
+ * disponibles en el heatmap. Acepta parámetros opcionales (fcr, volume)
+ * para mayor precisión cuando están disponibles.
+ *
+ * Se usa en generateDrilldownFromHeatmap() de analysisGenerator.ts para
+ * asegurar consistencia entre la ruta fresh (datos completos) y la ruta
+ * cached (datos del heatmap).
+ *
+ * @param score - Agentic Readiness Score (0-10)
+ * @param cv - Coeficiente de Variación del AHT como decimal (0.75 = 75%)
+ * @param transfer - Tasa de transferencia como decimal (0.20 = 20%)
+ * @param fcr - FCR rate como decimal (0.80 = 80%), opcional
+ * @param volume - Volumen mensual de interacciones, opcional
+ * @returns AgenticTier ('AUTOMATE' | 'ASSIST' | 'AUGMENT' | 'HUMAN-ONLY')
+ */
+export function clasificarTierSimple(
+  score: number,
+  cv: number,      // CV como decimal (0.75 = 75%)
+  transfer: number, // Transfer como decimal (0.20 = 20%)
+  fcr?: number,    // FCR como decimal (0.80 = 80%)
+  volume?: number  // Volumen mensual
+): import('../types').AgenticTier {
+  // RED FLAGS críticos - mismos que clasificarTier() completa
+  // CV > 120% o Transfer > 50% son red flags absolutos
+  if (cv > 1.20 || transfer > 0.50) {
+    return 'HUMAN-ONLY';
+  }
+  // Volume < 50/mes es red flag si tenemos el dato
+  if (volume !== undefined && volume < 50) {
+    return 'HUMAN-ONLY';
+  }
+
+  // TIER 1: AUTOMATE - requiere métricas óptimas
+  // Mismo criterio que clasificarTier(): score >= 7.5, cv <= 0.75, transfer <= 0.20, fcr >= 0.50
+  const fcrOk = fcr === undefined || fcr >= 0.50; // Si no tenemos FCR, asumimos OK
+  if (score >= 7.5 && cv <= 0.75 && transfer <= 0.20 && fcrOk) {
+    return 'AUTOMATE';
+  }
+
+  // TIER 2: ASSIST - apto para copilot/asistencia
+  if (score >= 5.5 && cv <= 0.90 && transfer <= 0.30) {
+    return 'ASSIST';
+  }
+
+  // TIER 3: AUGMENT - requiere optimización previa
+  if (score >= 3.5) {
+    return 'AUGMENT';
+  }
+
+  // TIER 4: HUMAN-ONLY - proceso complejo
+  return 'HUMAN-ONLY';
 }
 
 /**
@@ -627,8 +758,9 @@ export function calculateDrilldownMetrics(
     const volume = group.length;
     if (volume < 5) return null;
 
-    // Filtrar solo VALID para cálculo de CV
-    const validRecords = group.filter(i => !i.record_status || i.record_status === 'valid');
+    // Filtrar solo VALID para cálculo de CV (normalizar a uppercase para comparación case-insensitive)
+    const getStatus = (i: RawInteraction) => (i.record_status || '').toString().toUpperCase().trim();
+    const validRecords = group.filter(i => !i.record_status || getStatus(i) === 'VALID');
     const volumeValid = validRecords.length;
     if (volumeValid < 3) return null;
 
@@ -647,9 +779,13 @@ export function calculateDrilldownMetrics(
     const transfer_decimal = transfers / volume;
     const transfer_percent = transfer_decimal * 100;
 
+    // FCR Real: usa fcr_real_flag del CSV (sin transferencia Y sin recontacto 7d)
     const fcrCount = group.filter(i => i.fcr_real_flag === true).length;
     const fcr_decimal = fcrCount / volume;
     const fcr_percent = fcr_decimal * 100;
+
+    // FCR Técnico: 100 - transfer_rate (comparable con benchmarks de industria)
+    const fcr_tecnico_percent = 100 - transfer_percent;
 
     // Calcular score con nueva fórmula v3.4
     const { score, breakdown } = calcularScoreCola(
@@ -671,7 +807,9 @@ export function calculateDrilldownMetrics(
       validPct
     );
 
-    const annualCost = Math.round((aht_mean / 3600) * costPerHour * volume / effectiveProductivity);
+    // v4.2: Convertir volumen de 11 meses a anual para el coste
+    const annualVolume = (volume / 11) * 12;  // 11 meses → anual
+    const annualCost = Math.round((aht_mean / 3600) * costPerHour * annualVolume / effectiveProductivity);
 
     return {
       original_queue_id: '', // Se asigna después
@@ -681,6 +819,7 @@ export function calculateDrilldownMetrics(
       cv_aht: Math.round(cv_aht_percent * 10) / 10,
       transfer_rate: Math.round(transfer_percent * 10) / 10,
       fcr_rate: Math.round(fcr_percent * 10) / 10,
+      fcr_tecnico: Math.round(fcr_tecnico_percent * 10) / 10,  // FCR Técnico para consistencia con Summary
       agenticScore: score,
       scoreBreakdown: breakdown,
       tier,
@@ -753,6 +892,7 @@ export function calculateDrilldownMetrics(
     const avgCv = originalQueues.reduce((sum, q) => sum + q.cv_aht * q.volume, 0) / totalVolume;
     const avgTransfer = originalQueues.reduce((sum, q) => sum + q.transfer_rate * q.volume, 0) / totalVolume;
     const avgFcr = originalQueues.reduce((sum, q) => sum + q.fcr_rate * q.volume, 0) / totalVolume;
+    const avgFcrTecnico = originalQueues.reduce((sum, q) => sum + q.fcr_tecnico * q.volume, 0) / totalVolume;
 
     // Score global ponderado por volumen
     const avgScore = originalQueues.reduce((sum, q) => sum + q.agenticScore * q.volume, 0) / totalVolume;
@@ -775,6 +915,7 @@ export function calculateDrilldownMetrics(
       cv_aht: Math.round(avgCv * 10) / 10,
       transfer_rate: Math.round(avgTransfer * 10) / 10,
       fcr_rate: Math.round(avgFcr * 10) / 10,
+      fcr_tecnico: Math.round(avgFcrTecnico * 10) / 10,  // FCR Técnico para consistencia
       agenticScore: Math.round(avgScore * 10) / 10,
       isPriorityCandidate: hasAutomateQueue,
       annualCost: totalCost
@@ -804,7 +945,7 @@ export function calculateDrilldownMetrics(
 /**
  * PASO 3: Transformar métricas a dimensiones (0-10)
  */
-function generateHeatmapFromMetrics(
+export function generateHeatmapFromMetrics(
   metrics: SkillMetrics[],
   avgCsat: number,
   segmentMapping?: { high_value_queues: string[]; medium_value_queues: string[]; low_value_queues: string[] }
@@ -858,8 +999,10 @@ function generateHeatmapFromMetrics(
     
     // Scores de performance (normalizados 0-100)
     // FCR Real: (transfer_flag == FALSE) AND (repeat_call_7d == FALSE)
-    // Usamos el fcr_rate calculado correctamente
+    // Esta es la métrica más estricta - sin transferencia Y sin recontacto en 7 días
     const fcr_score = Math.round(m.fcr_rate);
+    // FCR Técnico: solo sin transferencia (comparable con benchmarks de industria COPC, Dimension Data)
+    const fcr_tecnico_score = Math.round(m.fcr_tecnico);
     const aht_score = Math.round(Math.max(0, Math.min(100, 100 - ((m.aht_mean - 240) / 310) * 100)));
     const csat_score = avgCsat;
     const hold_time_score = Math.round(Math.max(0, Math.min(100, 100 - (m.hold_time_mean / 60) * 10)));
@@ -871,9 +1014,15 @@ function generateHeatmapFromMetrics(
     return {
       skill: m.skill,
       volume: m.volume,
+      cost_volume: m.cost_volume,                  // Volumen usado para calcular coste (non-abandon)
       aht_seconds: Math.round(m.aht_mean),
+      aht_total: Math.round(m.aht_total),          // AHT con TODAS las filas (solo informativo)
+      aht_benchmark: Math.round(m.aht_benchmark),  // AHT tradicional para comparación con benchmarks de industria
+      annual_cost: Math.round(m.total_cost),       // Coste calculado con TODOS los registros (noise + zombie + valid)
+      cpi: m.cpi,                                  // Coste por interacción (calculado correctamente)
       metrics: {
-        fcr: fcr_score,
+        fcr: fcr_score,                    // FCR Real (más estricto, con filtro de recontacto 7d)
+        fcr_tecnico: fcr_tecnico_score,    // FCR Técnico (comparable con benchmarks industria)
         aht: aht_score,
         csat: csat_score,
         hold_time: hold_time_score,
@@ -912,17 +1061,146 @@ function generateHeatmapFromMetrics(
 }
 
 /**
- * Calcular Health Score global
+ * Calcular Health Score global - Nueva fórmula basada en benchmarks de industria
+ *
+ * PASO 1: Normalización de componentes usando percentiles de industria
+ * PASO 2: Ponderación (FCR 35%, Abandono 30%, CSAT Proxy 20%, AHT 15%)
+ * PASO 3: Penalizaciones por umbrales críticos
+ *
+ * Benchmarks de industria (Cross-Industry):
+ * - FCR Técnico: P10=85%, P50=68%, P90=50%
+ * - Abandono: P10=3%, P50=5%, P90=10%
+ * - AHT: P10=240s, P50=380s, P90=540s
  */
 function calculateHealthScore(heatmapData: HeatmapDataPoint[]): number {
   if (heatmapData.length === 0) return 50;
 
-  const avgFCR = heatmapData.reduce((sum, d) => sum + (d.metrics?.fcr || 0), 0) / heatmapData.length;
-  const avgAHT = heatmapData.reduce((sum, d) => sum + (d.metrics?.aht || 0), 0) / heatmapData.length;
-  const avgCSAT = heatmapData.reduce((sum, d) => sum + (d.metrics?.csat || 0), 0) / heatmapData.length;
-  const avgVariability = heatmapData.reduce((sum, d) => sum + (100 - (d.variability?.cv_aht || 0)), 0) / heatmapData.length;
-  
-  return Math.round((avgFCR + avgAHT + avgCSAT + avgVariability) / 4);
+  const totalVolume = heatmapData.reduce((sum, d) => sum + d.volume, 0);
+  if (totalVolume === 0) return 50;
+
+  // ═══════════════════════════════════════════════════════════════
+  // PASO 0: Extraer métricas ponderadas por volumen
+  // ═══════════════════════════════════════════════════════════════
+
+  // FCR Técnico (%)
+  const fcrTecnico = heatmapData.reduce((sum, d) =>
+    sum + (d.metrics?.fcr_tecnico ?? (100 - d.metrics.transfer_rate)) * d.volume, 0) / totalVolume;
+
+  // Abandono (%)
+  const abandono = heatmapData.reduce((sum, d) =>
+    sum + (d.metrics?.abandonment_rate || 0) * d.volume, 0) / totalVolume;
+
+  // AHT (segundos) - usar aht_seconds (AHT limpio sin noise/zombies)
+  const aht = heatmapData.reduce((sum, d) =>
+    sum + d.aht_seconds * d.volume, 0) / totalVolume;
+
+  // Transferencia (%)
+  const transferencia = heatmapData.reduce((sum, d) =>
+    sum + (d.metrics?.transfer_rate || 0) * d.volume, 0) / totalVolume;
+
+  // ═══════════════════════════════════════════════════════════════
+  // PASO 1: Normalización de componentes (0-100 score)
+  // ═══════════════════════════════════════════════════════════════
+
+  // FCR Técnico: P10=85%, P50=68%, P90=50%
+  // Más alto = mejor
+  let fcrScore: number;
+  if (fcrTecnico >= 85) {
+    fcrScore = 95 + 5 * Math.min(1, (fcrTecnico - 85) / 15); // 95-100
+  } else if (fcrTecnico >= 68) {
+    fcrScore = 50 + 50 * (fcrTecnico - 68) / (85 - 68); // 50-100
+  } else if (fcrTecnico >= 50) {
+    fcrScore = 20 + 30 * (fcrTecnico - 50) / (68 - 50); // 20-50
+  } else {
+    fcrScore = Math.max(0, 20 * fcrTecnico / 50); // 0-20
+  }
+
+  // Abandono: P10=3%, P50=5%, P90=10%
+  // Más bajo = mejor (invertido)
+  let abandonoScore: number;
+  if (abandono <= 3) {
+    abandonoScore = 95 + 5 * Math.max(0, (3 - abandono) / 3); // 95-100
+  } else if (abandono <= 5) {
+    abandonoScore = 50 + 45 * (5 - abandono) / (5 - 3); // 50-95
+  } else if (abandono <= 10) {
+    abandonoScore = 20 + 30 * (10 - abandono) / (10 - 5); // 20-50
+  } else {
+    // Por encima de P90 (crítico): penalización fuerte
+    abandonoScore = Math.max(0, 20 - 2 * (abandono - 10)); // 0-20, decrece rápido
+  }
+
+  // AHT: P10=240s, P50=380s, P90=540s
+  // Más bajo = mejor (invertido)
+  // PERO: Si FCR es bajo, AHT bajo puede indicar llamadas rushed (mala calidad)
+  let ahtScore: number;
+  if (aht <= 240) {
+    // Por debajo de P10 (excelente eficiencia)
+    // Si FCR > 65%, es genuinamente eficiente; si no, puede ser rushed
+    if (fcrTecnico > 65) {
+      ahtScore = 95 + 5 * Math.max(0, (240 - aht) / 60); // 95-100
+    } else {
+      ahtScore = 70; // Cap score si FCR es bajo (posible rushed calls)
+    }
+  } else if (aht <= 380) {
+    ahtScore = 50 + 45 * (380 - aht) / (380 - 240); // 50-95
+  } else if (aht <= 540) {
+    ahtScore = 20 + 30 * (540 - aht) / (540 - 380); // 20-50
+  } else {
+    ahtScore = Math.max(0, 20 * (600 - aht) / 60); // 0-20
+  }
+
+  // CSAT Proxy: Calculado desde FCR + Abandono
+  // Sin datos reales de CSAT, usamos proxy
+  const csatProxy = 0.60 * fcrScore + 0.40 * abandonoScore;
+
+  // ═══════════════════════════════════════════════════════════════
+  // PASO 2: Aplicar pesos
+  // FCR 35% + Abandono 30% + CSAT Proxy 20% + AHT 15%
+  // ═══════════════════════════════════════════════════════════════
+
+  const subtotal = (
+    fcrScore * 0.35 +
+    abandonoScore * 0.30 +
+    csatProxy * 0.20 +
+    ahtScore * 0.15
+  );
+
+  // ═══════════════════════════════════════════════════════════════
+  // PASO 3: Calcular penalizaciones
+  // ═══════════════════════════════════════════════════════════════
+
+  let penalties = 0;
+
+  // Penalización por abandono crítico (>10%)
+  if (abandono > 10) {
+    penalties += 10;
+  }
+
+  // Penalización por transferencia alta (>20%)
+  if (transferencia > 20) {
+    penalties += 5;
+  }
+
+  // Penalización combo: Abandono alto + FCR bajo
+  // Indica problemas sistémicos de capacidad Y resolución
+  if (abandono > 8 && fcrTecnico < 78) {
+    penalties += 5;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PASO 4: Score final
+  // ═══════════════════════════════════════════════════════════════
+
+  const finalScore = Math.max(0, Math.min(100, subtotal - penalties));
+
+  // Debug logging
+  console.log('📊 Health Score Calculation:', {
+    inputs: { fcrTecnico: fcrTecnico.toFixed(1), abandono: abandono.toFixed(1), aht: Math.round(aht), transferencia: transferencia.toFixed(1) },
+    scores: { fcrScore: fcrScore.toFixed(1), abandonoScore: abandonoScore.toFixed(1), ahtScore: ahtScore.toFixed(1), csatProxy: csatProxy.toFixed(1) },
+    weighted: { subtotal: subtotal.toFixed(1), penalties, final: Math.round(finalScore) }
+  });
+
+  return Math.round(finalScore);
 }
 
 /**
@@ -942,10 +1220,10 @@ function generateDimensionsFromRealData(
   const avgHoldTime = metrics.reduce((sum, m) => sum + m.hold_time_mean, 0) / metrics.length;
   const totalCost = metrics.reduce((sum, m) => sum + m.total_cost, 0);
 
-  // FCR real (ponderado por volumen)
+  // FCR Técnico (100 - transfer_rate, ponderado por volumen) - comparable con benchmarks
   const totalVolumeForFCR = metrics.reduce((sum, m) => sum + m.volume_valid, 0);
   const avgFCR = totalVolumeForFCR > 0
-    ? metrics.reduce((sum, m) => sum + (m.fcr_rate * m.volume_valid), 0) / totalVolumeForFCR
+    ? metrics.reduce((sum, m) => sum + (m.fcr_tecnico * m.volume_valid), 0) / totalVolumeForFCR
     : 0;
 
   // Calcular ratio P90/P50 aproximado desde CV
@@ -964,20 +1242,41 @@ function generateDimensionsFromRealData(
   // % fuera horario >30% penaliza, ratio pico/valle >3x penaliza
   const offHoursPct = hourlyDistribution.off_hours_pct;
 
-  // Calcular ratio pico/valle
+  // Calcular ratio pico/valle (consistente con backendMapper.ts)
   const hourlyValues = hourlyDistribution.hourly.filter(v => v > 0);
-  const peakVolume = Math.max(...hourlyValues, 1);
-  const valleyVolume = Math.min(...hourlyValues.filter(v => v > 0), 1);
-  const peakValleyRatio = peakVolume / valleyVolume;
+  const peakVolume = hourlyValues.length > 0 ? Math.max(...hourlyValues) : 0;
+  const valleyVolume = hourlyValues.length > 0 ? Math.min(...hourlyValues) : 1;
+  const peakValleyRatio = valleyVolume > 0 ? peakVolume / valleyVolume : 1;
 
   // Score volumetría: 100 base, penalizar por fuera de horario y ratio pico/valle
+  // NOTA: Fórmulas sincronizadas con backendMapper.ts buildVolumetryDimension()
   let volumetryScore = 100;
-  if (offHoursPct > 30) volumetryScore -= (offHoursPct - 30) * 1.5; // Penalizar por % fuera horario
-  if (peakValleyRatio > 3) volumetryScore -= (peakValleyRatio - 3) * 10; // Penalizar por ratio pico/valle
-  volumetryScore = Math.max(20, Math.min(100, Math.round(volumetryScore)));
 
-  // === CPI: Coste por interacción ===
-  const costPerInteraction = totalVolume > 0 ? totalCost / totalVolume : 0;
+  // Penalización por fuera de horario (misma fórmula que backendMapper)
+  if (offHoursPct > 30) {
+    volumetryScore -= Math.min(40, (offHoursPct - 30) * 2); // -2 pts por cada % sobre 30%
+  } else if (offHoursPct > 20) {
+    volumetryScore -= (offHoursPct - 20); // -1 pt por cada % entre 20-30%
+  }
+
+  // Penalización por ratio pico/valle alto (misma fórmula que backendMapper)
+  if (peakValleyRatio > 5) {
+    volumetryScore -= 30;
+  } else if (peakValleyRatio > 3) {
+    volumetryScore -= 20;
+  } else if (peakValleyRatio > 2) {
+    volumetryScore -= 10;
+  }
+
+  volumetryScore = Math.max(0, Math.min(100, Math.round(volumetryScore)));
+
+  // === CPI: Coste por interacción (consistente con Executive Summary) ===
+  // Usar cost_volume (non-abandon) como denominador, igual que heatmapData
+  const totalCostVolume = metrics.reduce((sum, m) => sum + m.cost_volume, 0);
+  // Usar CPI pre-calculado si disponible, sino calcular desde total_cost / cost_volume
+  const costPerInteraction = totalCostVolume > 0
+    ? metrics.reduce((sum, m) => sum + (m.cpi * m.cost_volume), 0) / totalCostVolume
+    : (totalCost / totalVolume);
 
   // Calcular Agentic Score
   const predictability = Math.max(0, Math.min(10, 10 - ((avgCV - 0.3) / 1.2 * 10)));
@@ -1008,37 +1307,37 @@ function generateDimensionsFromRealData(
         peak_hours: hourlyDistribution.peak_hours
       }
     },
-    // 2. EFICIENCIA OPERATIVA
+    // 2. EFICIENCIA OPERATIVA - KPI principal: AHT P50 (industry standard)
     {
       id: 'operational_efficiency',
       name: 'operational_efficiency',
       title: 'Eficiencia Operativa',
       score: Math.round(efficiencyScore),
       percentile: efficiencyPercentile,
-      summary: `Ratio P90/P50: ${avgRatio.toFixed(2)} (benchmark: <2.0). AHT P50: ${avgAHT}s (benchmark: 380s). Hold time: ${Math.round(avgHoldTime)}s.`,
-      kpi: { label: 'Ratio P90/P50', value: avgRatio.toFixed(2) },
+      summary: `AHT P50: ${avgAHT}s (benchmark: 300s). Ratio P90/P50: ${avgRatio.toFixed(2)} (benchmark: <2.0). Hold time: ${Math.round(avgHoldTime)}s.`,
+      kpi: { label: 'AHT P50', value: `${avgAHT}s` },
       icon: Zap
     },
-    // 3. EFECTIVIDAD & RESOLUCIÓN
+    // 3. EFECTIVIDAD & RESOLUCIÓN (FCR Técnico = 100 - transfer_rate)
     {
       id: 'effectiveness_resolution',
       name: 'effectiveness_resolution',
       title: 'Efectividad & Resolución',
-      score: Math.round(avgFCR),
+      score: avgFCR >= 90 ? 100 : avgFCR >= 85 ? 80 : avgFCR >= 80 ? 60 : avgFCR >= 75 ? 40 : 20,
       percentile: fcrPercentile,
-      summary: `FCR: ${avgFCR.toFixed(1)}% (benchmark: 70%). Calculado como: (sin transferencia) AND (sin rellamada 7d).`,
-      kpi: { label: 'FCR Real', value: `${Math.round(avgFCR)}%` },
+      summary: `FCR Técnico: ${avgFCR.toFixed(1)}% (benchmark: 85-90%). Transfer: ${avgTransferRate.toFixed(1)}%.`,
+      kpi: { label: 'FCR Técnico', value: `${Math.round(avgFCR)}%` },
       icon: Target
     },
-    // 4. COMPLEJIDAD & PREDICTIBILIDAD - Usar % transferencias como métrica principal
+    // 4. COMPLEJIDAD & PREDICTIBILIDAD - KPI principal: CV AHT (industry standard for predictability)
     {
       id: 'complexity_predictability',
       name: 'complexity_predictability',
       title: 'Complejidad & Predictibilidad',
-      score: Math.round(100 - avgTransferRate), // Inverso de transfer rate
-      percentile: avgTransferRate < 15 ? 75 : avgTransferRate < 25 ? 50 : 30,
-      summary: `Tasa transferencias: ${avgTransferRate.toFixed(1)}%. CV AHT: ${(avgCV * 100).toFixed(1)}%. ${avgTransferRate < 15 ? 'Baja complejidad.' : 'Alta complejidad, considerar capacitación.'}`,
-      kpi: { label: '% Transferencias', value: `${avgTransferRate.toFixed(1)}%` },
+      score: avgCV <= 0.75 ? 100 : avgCV <= 1.0 ? 80 : avgCV <= 1.25 ? 60 : avgCV <= 1.5 ? 40 : 20, // Basado en CV AHT
+      percentile: avgCV <= 0.75 ? 75 : avgCV <= 1.0 ? 55 : avgCV <= 1.25 ? 40 : 25,
+      summary: `CV AHT: ${(avgCV * 100).toFixed(0)}% (benchmark: <75%). Hold time: ${Math.round(avgHoldTime)}s. ${avgCV <= 0.75 ? 'Alta predictibilidad para WFM.' : avgCV <= 1.0 ? 'Predictibilidad aceptable.' : 'Alta variabilidad, dificulta planificación.'}`,
+      kpi: { label: 'CV AHT', value: `${(avgCV * 100).toFixed(0)}%` },
       icon: Brain
     },
     // 5. SATISFACCIÓN - CSAT
@@ -1205,7 +1504,11 @@ function calculateAgenticReadinessFromRealData(metrics: SkillMetrics[]): Agentic
 /**
  * Generar findings desde datos reales - SOLO datos calculados del dataset
  */
-function generateFindingsFromRealData(metrics: SkillMetrics[], interactions: RawInteraction[]): Finding[] {
+function generateFindingsFromRealData(
+  metrics: SkillMetrics[],
+  interactions: RawInteraction[],
+  hourlyDistribution?: { hourly: number[]; off_hours_pct: number; peak_hours: number[] }
+): Finding[] {
   const findings: Finding[] = [];
   const totalVolume = interactions.length;
 
@@ -1217,6 +1520,20 @@ function generateFindingsFromRealData(metrics: SkillMetrics[], interactions: Raw
   // Calcular abandono real
   const totalAbandoned = metrics.reduce((sum, m) => sum + m.abandon_count, 0);
   const abandonRate = totalVolume > 0 ? (totalAbandoned / totalVolume) * 100 : 0;
+
+  // Finding 0: Alto volumen fuera de horario - oportunidad para agente virtual
+  const offHoursPct = hourlyDistribution?.off_hours_pct ?? 0;
+  if (offHoursPct > 20) {
+    const offHoursVolume = Math.round(totalVolume * offHoursPct / 100);
+    findings.push({
+      type: offHoursPct > 30 ? 'critical' : 'warning',
+      title: 'Alto Volumen Fuera de Horario',
+      text: `${offHoursPct.toFixed(0)}% de interacciones fuera de horario (8-19h)`,
+      dimensionId: 'volumetry_distribution',
+      description: `${offHoursVolume.toLocaleString()} interacciones (${offHoursPct.toFixed(1)}%) ocurren fuera de horario laboral. Oportunidad ideal para implementar agentes virtuales 24/7.`,
+      impact: offHoursPct > 30 ? 'high' : 'medium'
+    });
+  }
 
   // Finding 1: Ratio P90/P50 si está fuera de benchmark
   if (avgRatio > 2.0) {
@@ -1284,29 +1601,53 @@ function generateFindingsFromRealData(metrics: SkillMetrics[], interactions: Raw
 /**
  * Generar recomendaciones desde datos reales
  */
-function generateRecommendationsFromRealData(metrics: SkillMetrics[]): Recommendation[] {
+function generateRecommendationsFromRealData(
+  metrics: SkillMetrics[],
+  hourlyDistribution?: { hourly: number[]; off_hours_pct: number; peak_hours: number[] },
+  totalVolume?: number
+): Recommendation[] {
   const recommendations: Recommendation[] = [];
-  
+
+  // Recomendación prioritaria: Agente virtual para fuera de horario
+  const offHoursPct = hourlyDistribution?.off_hours_pct ?? 0;
+  const volume = totalVolume ?? metrics.reduce((sum, m) => sum + m.volume, 0);
+  if (offHoursPct > 20) {
+    const offHoursVolume = Math.round(volume * offHoursPct / 100);
+    const estimatedContainment = offHoursPct > 30 ? 60 : 45; // % que puede resolver el bot
+    const estimatedSavings = Math.round(offHoursVolume * estimatedContainment / 100);
+    recommendations.push({
+      priority: 'high',
+      title: 'Implementar Agente Virtual 24/7',
+      text: `Desplegar agente virtual para atender ${offHoursPct.toFixed(0)}% de interacciones fuera de horario`,
+      description: `${offHoursVolume.toLocaleString()} interacciones ocurren fuera de horario laboral (19:00-08:00). Un agente virtual puede resolver ~${estimatedContainment}% de estas consultas automáticamente, liberando recursos humanos y mejorando la experiencia del cliente con atención inmediata 24/7.`,
+      dimensionId: 'volumetry_distribution',
+      impact: `Potencial de contención: ${estimatedSavings.toLocaleString()} interacciones/período`,
+      timeline: '1-3 meses'
+    });
+  }
+
   const highVariabilitySkills = metrics.filter(m => m.cv_aht > 0.45);
   if (highVariabilitySkills.length > 0) {
     recommendations.push({
       priority: 'high',
       title: 'Estandarizar Procesos',
+      text: `Crear guías y scripts para los ${highVariabilitySkills.length} skills con alta variabilidad`,
       description: `Crear guías y scripts para los ${highVariabilitySkills.length} skills con alta variabilidad.`,
       impact: 'Reducción del 20-30% en AHT'
     });
   }
-  
+
   const highVolumeSkills = metrics.filter(m => m.volume > 500);
   if (highVolumeSkills.length > 0) {
     recommendations.push({
       priority: 'high',
       title: 'Automatizar Skills de Alto Volumen',
+      text: `Implementar bots para los ${highVolumeSkills.length} skills con > 500 interacciones`,
       description: `Implementar bots para los ${highVolumeSkills.length} skills con > 500 interacciones.`,
       impact: 'Ahorro estimado del 40-60%'
     });
   }
-  
+
   return recommendations;
 }
 
@@ -1347,12 +1688,18 @@ const CPI_CONFIG = {
   RATE_AUGMENT: 0.15   // 15% mejora en optimización
 };
 
+// Período de datos: el volumen en los datos corresponde a 11 meses, no es mensual
+const DATA_PERIOD_MONTHS = 11;
+
 /**
- * v3.6: Calcular ahorro TCO realista usando fórmula explícita con CPI fijos
+ * v4.2: Calcular ahorro TCO realista usando fórmula explícita con CPI fijos
+ * IMPORTANTE: El volumen de los datos corresponde a 11 meses, por lo que:
+ * - Primero calculamos volumen mensual: Vol / 11
+ * - Luego anualizamos: × 12
  * Fórmulas:
- * - AUTOMATE: Vol × 12 × 70% × (CPI_humano - CPI_bot)
- * - ASSIST: Vol × 12 × 30% × (CPI_humano - CPI_assist)
- * - AUGMENT: Vol × 12 × 15% × (CPI_humano - CPI_augment)
+ * - AUTOMATE: (Vol/11) × 12 × 70% × (CPI_humano - CPI_bot)
+ * - ASSIST: (Vol/11) × 12 × 30% × (CPI_humano - CPI_assist)
+ * - AUGMENT: (Vol/11) × 12 × 15% × (CPI_humano - CPI_augment)
  * - HUMAN-ONLY: 0€
  */
 function calculateRealisticSavings(
@@ -1364,18 +1711,21 @@ function calculateRealisticSavings(
 
   const { CPI_HUMANO, CPI_BOT, CPI_ASSIST, CPI_AUGMENT, RATE_AUTOMATE, RATE_ASSIST, RATE_AUGMENT } = CPI_CONFIG;
 
+  // Convertir volumen del período (11 meses) a volumen anual
+  const annualVolume = (volume / DATA_PERIOD_MONTHS) * 12;
+
   switch (tier) {
     case 'AUTOMATE':
-      // Ahorro = Vol × 12 × 70% × (CPI_humano - CPI_bot)
-      return Math.round(volume * 12 * RATE_AUTOMATE * (CPI_HUMANO - CPI_BOT));
+      // Ahorro = VolAnual × 70% × (CPI_humano - CPI_bot)
+      return Math.round(annualVolume * RATE_AUTOMATE * (CPI_HUMANO - CPI_BOT));
 
     case 'ASSIST':
-      // Ahorro = Vol × 12 × 30% × (CPI_humano - CPI_assist)
-      return Math.round(volume * 12 * RATE_ASSIST * (CPI_HUMANO - CPI_ASSIST));
+      // Ahorro = VolAnual × 30% × (CPI_humano - CPI_assist)
+      return Math.round(annualVolume * RATE_ASSIST * (CPI_HUMANO - CPI_ASSIST));
 
     case 'AUGMENT':
-      // Ahorro = Vol × 12 × 15% × (CPI_humano - CPI_augment)
-      return Math.round(volume * 12 * RATE_AUGMENT * (CPI_HUMANO - CPI_AUGMENT));
+      // Ahorro = VolAnual × 15% × (CPI_humano - CPI_augment)
+      return Math.round(annualVolume * RATE_AUGMENT * (CPI_HUMANO - CPI_AUGMENT));
 
     case 'HUMAN-ONLY':
     default:
@@ -1384,118 +1734,79 @@ function calculateRealisticSavings(
 }
 
 export function generateOpportunitiesFromDrilldown(drilldownData: DrilldownDataPoint[], costPerHour: number): Opportunity[] {
-  const opportunities: Opportunity[] = [];
+  // v4.3: Top 10 iniciativas por potencial económico (todos los tiers, no solo AUTOMATE)
+  // Cada cola = 1 burbuja con su score real y ahorro TCO real según su tier
 
-  // Extraer todas las colas usando el nuevo sistema de Tiers
+  // Extraer todas las colas con su skill padre (excluir HUMAN-ONLY, no tienen ahorro)
   const allQueues = drilldownData.flatMap(skill =>
-    skill.originalQueues.map(q => ({
-      ...q,
-      skillName: skill.skill
-    }))
+    skill.originalQueues
+      .filter(q => q.tier !== 'HUMAN-ONLY')  // HUMAN-ONLY no genera ahorro
+      .map(q => ({
+        ...q,
+        skillName: skill.skill
+      }))
   );
 
-  // v3.5: Clasificar colas por TIER (no por CV)
-  const automateQueues = allQueues.filter(q => q.tier === 'AUTOMATE');
-  const assistQueues = allQueues.filter(q => q.tier === 'ASSIST');
-  const augmentQueues = allQueues.filter(q => q.tier === 'AUGMENT');
-  const humanQueues = allQueues.filter(q => q.tier === 'HUMAN-ONLY');
+  if (allQueues.length === 0) {
+    console.warn('⚠️ No hay colas con potencial de ahorro para mostrar en Opportunity Matrix');
+    return [];
+  }
 
-  // Calcular volúmenes y costes por tier
-  const automateVolume = automateQueues.reduce((sum, q) => sum + q.volume, 0);
-  const automateCost = automateQueues.reduce((sum, q) => sum + (q.annualCost || 0), 0);
-  const assistVolume = assistQueues.reduce((sum, q) => sum + q.volume, 0);
-  const assistCost = assistQueues.reduce((sum, q) => sum + (q.annualCost || 0), 0);
-  const augmentVolume = augmentQueues.reduce((sum, q) => sum + q.volume, 0);
-  const augmentCost = augmentQueues.reduce((sum, q) => sum + (q.annualCost || 0), 0);
-  const totalCost = automateCost + assistCost + augmentCost;
+  // Calcular ahorro TCO por cola individual según su tier
+  const queuesWithSavings = allQueues.map(q => {
+    const savings = calculateRealisticSavings(q.volume, q.annualCost || 0, q.tier);
+    return { ...q, savings };
+  });
 
-  // v3.5: Calcular ahorros REALISTAS con fórmula TCO
-  const automateSavings = calculateRealisticSavings(automateVolume, automateCost, 'AUTOMATE');
-  const assistSavings = calculateRealisticSavings(assistVolume, assistCost, 'ASSIST');
-  const augmentSavings = calculateRealisticSavings(augmentVolume, augmentCost, 'AUGMENT');
+  // Ordenar por ahorro descendente
+  queuesWithSavings.sort((a, b) => b.savings - a.savings);
 
-  // Helper para obtener top skills
-  const getTopSkills = (queues: typeof allQueues, limit: number = 3): string[] => {
-    const skillVolumes = new Map<string, number>();
-    queues.forEach(q => {
-      skillVolumes.set(q.skillName, (skillVolumes.get(q.skillName) || 0) + q.volume);
-    });
-    return Array.from(skillVolumes.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([name]) => name);
+  // Calcular max savings para escalar impact a 0-10
+  const maxSavings = Math.max(...queuesWithSavings.map(q => q.savings), 1);
+
+  // Mapeo de tier a dimensionId y customer_segment
+  const tierToDimension: Record<string, string> = {
+    'AUTOMATE': 'agentic_readiness',
+    'ASSIST': 'effectiveness_resolution',
+    'AUGMENT': 'complexity_predictability'
+  };
+  const tierToSegment: Record<string, CustomerSegment> = {
+    'AUTOMATE': 'high',
+    'ASSIST': 'medium',
+    'AUGMENT': 'low'
   };
 
-  let oppIndex = 1;
+  // Generar oportunidades individuales (TOP 10 por potencial económico)
+  const opportunities: Opportunity[] = queuesWithSavings
+    .slice(0, 10)
+    .map((q, idx) => {
+      // Impact: ahorro escalado a 0-10
+      const impactRaw = (q.savings / maxSavings) * 10;
+      const impact = Math.max(1, Math.min(10, Math.round(impactRaw * 10) / 10));
 
-  // Oportunidad 1: AUTOMATE (70% containment)
-  if (automateQueues.length > 0) {
-    opportunities.push({
-      id: `opp-${oppIndex++}`,
-      name: `Automatizar ${automateQueues.length} colas tier AUTOMATE`,
-      impact: Math.min(10, Math.round((automateCost / totalCost) * 10) + 3),
-      feasibility: 9,
-      savings: automateSavings,
-      dimensionId: 'agentic_readiness',
-      customer_segment: 'high' as CustomerSegment
+      // Feasibility: agenticScore directo (ya es 0-10)
+      const feasibility = Math.round(q.agenticScore * 10) / 10;
+
+      // Nombre con prefijo de tier para claridad
+      const tierPrefix = q.tier === 'AUTOMATE' ? '🤖' : q.tier === 'ASSIST' ? '🤝' : '📚';
+      const shortName = q.original_queue_id.length > 22
+        ? `${tierPrefix} ${q.original_queue_id.substring(0, 19)}...`
+        : `${tierPrefix} ${q.original_queue_id}`;
+
+      return {
+        id: `opp-${q.tier.toLowerCase()}-${idx + 1}`,
+        name: shortName,
+        impact,
+        feasibility,
+        savings: q.savings,
+        dimensionId: tierToDimension[q.tier] || 'agentic_readiness',
+        customer_segment: tierToSegment[q.tier] || 'medium'
+      };
     });
-  }
 
-  // Oportunidad 2: ASSIST (30% efficiency)
-  if (assistQueues.length > 0) {
-    opportunities.push({
-      id: `opp-${oppIndex++}`,
-      name: `Copilot IA en ${assistQueues.length} colas tier ASSIST`,
-      impact: Math.min(10, Math.round((assistCost / totalCost) * 10) + 2),
-      feasibility: 7,
-      savings: assistSavings,
-      dimensionId: 'effectiveness_resolution',
-      customer_segment: 'medium' as CustomerSegment
-    });
-  }
+  console.log(`📊 Opportunity Matrix: Top ${opportunities.length} iniciativas por potencial económico (de ${allQueues.length} colas con ahorro)`);
 
-  // Oportunidad 3: AUGMENT (15% optimization)
-  if (augmentQueues.length > 0) {
-    opportunities.push({
-      id: `opp-${oppIndex++}`,
-      name: `Optimizar ${augmentQueues.length} colas tier AUGMENT`,
-      impact: Math.min(10, Math.round((augmentCost / totalCost) * 10) + 1),
-      feasibility: 5,
-      savings: augmentSavings,
-      dimensionId: 'complexity_predictability',
-      customer_segment: 'medium' as CustomerSegment
-    });
-  }
-
-  // Oportunidades específicas por skill con alto volumen
-  const skillsWithHighVolume = drilldownData
-    .filter(s => s.volume > 10000)
-    .sort((a, b) => b.volume - a.volume)
-    .slice(0, 3);
-
-  for (const skill of skillsWithHighVolume) {
-    const autoQueues = skill.originalQueues.filter(q => q.tier === 'AUTOMATE');
-    if (autoQueues.length > 0) {
-      const skillVolume = autoQueues.reduce((sum, q) => sum + q.volume, 0);
-      const skillCost = autoQueues.reduce((sum, q) => sum + (q.annualCost || 0), 0);
-      const savings = calculateRealisticSavings(skillVolume, skillCost, 'AUTOMATE');
-
-      opportunities.push({
-        id: `opp-${oppIndex++}`,
-        name: `Quick win: ${skill.skill}`,
-        impact: Math.min(8, Math.round(skillVolume / 30000) + 3),
-        feasibility: 8,
-        savings,
-        dimensionId: 'operational_efficiency',
-        customer_segment: 'high' as CustomerSegment
-      });
-    }
-  }
-
-  // Ordenar por ahorro (ya es realista)
-  opportunities.sort((a, b) => b.savings - a.savings);
-
-  return opportunities.slice(0, 8);
+  return opportunities;
 }
 
 /**
@@ -2115,10 +2426,10 @@ function generateBenchmarkFromRealData(metrics: SkillMetrics[]): BenchmarkDataPo
   const avgCV = metrics.reduce((sum, m) => sum + m.cv_aht, 0) / (metrics.length || 1);
   const avgRatio = 1 + avgCV * 1.5; // Ratio P90/P50 aproximado
 
-  // FCR Real: ponderado por volumen
+  // FCR Técnico: 100 - transfer_rate (ponderado por volumen)
   const totalVolume = metrics.reduce((sum, m) => sum + m.volume_valid, 0);
   const avgFCR = totalVolume > 0
-    ? metrics.reduce((sum, m) => sum + (m.fcr_rate * m.volume_valid), 0) / totalVolume
+    ? metrics.reduce((sum, m) => sum + (m.fcr_tecnico * m.volume_valid), 0) / totalVolume
     : 0;
 
   // Abandono real

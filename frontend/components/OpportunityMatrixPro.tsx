@@ -81,13 +81,14 @@ const OpportunityMatrixPro: React.FC<OpportunityMatrixProProps> = ({ data, heatm
     };
   }, [dataWithPriority]);
 
-  // Dynamic title
+  // Dynamic title - v4.3: Top 10 iniciativas por potencial económico
   const dynamicTitle = useMemo(() => {
-    const { quickWins } = portfolioSummary;
-    if (quickWins.count > 0) {
-      return `${quickWins.count} Quick Wins pueden generar €${(quickWins.savings / 1000).toFixed(0)}K en ahorros con implementación en Q1-Q2`;
+    const totalQueues = dataWithPriority.length;
+    const totalSavings = portfolioSummary.totalSavings;
+    if (totalQueues === 0) {
+      return 'No hay iniciativas con potencial de ahorro identificadas';
     }
-    return `Portfolio de ${dataWithPriority.length} oportunidades identificadas con potencial de €${(portfolioSummary.totalSavings / 1000).toFixed(0)}K`;
+    return `Top ${totalQueues} iniciativas por potencial económico | Ahorro total: €${(totalSavings / 1000).toFixed(0)}K/año`;
   }, [portfolioSummary, dataWithPriority]);
 
   const getQuadrantInfo = (impact: number, feasibility: number): QuadrantInfo => {
@@ -160,21 +161,24 @@ const OpportunityMatrixPro: React.FC<OpportunityMatrixProProps> = ({ data, heatm
     <div id="opportunities" className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
       {/* Header with Dynamic Title */}
       <div className="mb-6">
-        <div className="flex items-center gap-2 mb-2">
-          <h3 className="font-bold text-2xl text-slate-800">Opportunity Matrix</h3>
-          <div className="group relative">
-            <HelpCircle size={18} className="text-slate-400 cursor-pointer" />
-            <div className="absolute bottom-full mb-2 w-80 bg-slate-800 text-white text-xs rounded py-2 px-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-              Prioriza iniciativas basadas en Impacto vs. Factibilidad. El tamaño de la burbuja representa el ahorro potencial. Los números indican la priorización estratégica. Click para ver detalles completos.
-              <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-800"></div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <h3 className="font-bold text-2xl text-slate-800">Opportunity Matrix - Top 10 Iniciativas</h3>
+            <div className="group relative">
+              <HelpCircle size={18} className="text-slate-400 cursor-pointer" />
+              <div className="absolute bottom-full mb-2 w-80 bg-slate-800 text-white text-xs rounded py-2 px-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+                Top 10 colas por potencial económico (todos los tiers). Eje X = Factibilidad (Agentic Score), Eje Y = Impacto (Ahorro TCO). Tamaño = Ahorro potencial. 🤖=AUTOMATE, 🤝=ASSIST, 📚=AUGMENT.
+                <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-800"></div>
+              </div>
             </div>
           </div>
+          <p className="text-xs text-slate-500 italic">Priorizadas por potencial de ahorro TCO (🤖 AUTOMATE, 🤝 ASSIST, 📚 AUGMENT)</p>
         </div>
         <p className="text-base text-slate-700 font-medium leading-relaxed mb-1">
           {dynamicTitle}
         </p>
         <p className="text-sm text-slate-500">
-          Portfolio de Oportunidades | Análisis de {dataWithPriority.length} iniciativas identificadas
+          {dataWithPriority.length} iniciativas identificadas | Ahorro TCO según tier (AUTOMATE 70%, ASSIST 30%, AUGMENT 15%)
         </p>
       </div>
 
@@ -217,33 +221,33 @@ const OpportunityMatrixPro: React.FC<OpportunityMatrixProProps> = ({ data, heatm
       <div className="relative w-full h-[500px] border-l-2 border-b-2 border-slate-400 rounded-bl-lg bg-gradient-to-tr from-slate-50 to-white">
         {/* Y-axis Label */}
         <div className="absolute -left-20 top-1/2 -translate-y-1/2 -rotate-90 text-sm font-bold text-slate-700 flex items-center gap-2">
-          <TrendingUp size={18} /> IMPACTO
+          <TrendingUp size={18} /> IMPACTO (Ahorro TCO)
         </div>
-        
+
         {/* X-axis Label */}
         <div className="absolute -bottom-14 left-1/2 -translate-x-1/2 text-sm font-bold text-slate-700 flex items-center gap-2">
-          <Zap size={18} /> FACTIBILIDAD
+          <Zap size={18} /> FACTIBILIDAD (Agentic Score)
         </div>
 
         {/* Axis scale labels */}
         <div className="absolute -left-2 top-0 -translate-x-full text-xs text-slate-500 font-medium">
-          Muy Alto
+          Alto (10)
         </div>
         <div className="absolute -left-2 top-1/2 -translate-x-full -translate-y-1/2 text-xs text-slate-500 font-medium">
-          Medio
+          Medio (5)
         </div>
         <div className="absolute -left-2 bottom-0 -translate-x-full text-xs text-slate-500 font-medium">
-          Bajo
+          Bajo (1)
         </div>
-        
+
         <div className="absolute left-0 -bottom-2 translate-y-full text-xs text-slate-500 font-medium">
-          Muy Difícil
+          0
         </div>
         <div className="absolute left-1/2 -bottom-2 -translate-x-1/2 translate-y-full text-xs text-slate-500 font-medium">
-          Moderado
+          5
         </div>
         <div className="absolute right-0 -bottom-2 translate-y-full text-xs text-slate-500 font-medium">
-          Fácil
+          10
         </div>
 
         {/* Quadrant Lines */}
@@ -364,22 +368,24 @@ const OpportunityMatrixPro: React.FC<OpportunityMatrixProProps> = ({ data, heatm
 
       {/* Enhanced Legend */}
       <div className="mt-8 p-4 bg-slate-50 rounded-lg">
-        <div className="flex flex-wrap items-center gap-6 text-xs">
-          <span className="font-semibold text-slate-700">Tamaño de burbuja = Ahorro potencial:</span>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-slate-400"></div>
-            <span className="text-slate-700">Pequeño (&lt;€50K)</span>
+        <div className="flex flex-wrap items-center gap-4 text-xs">
+          <span className="font-semibold text-slate-700">Tier:</span>
+          <div className="flex items-center gap-1">
+            <span>🤖</span>
+            <span className="text-emerald-600 font-medium">AUTOMATE</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-slate-400"></div>
-            <span className="text-slate-700">Medio (€50-150K)</span>
+          <div className="flex items-center gap-1">
+            <span>🤝</span>
+            <span className="text-blue-600 font-medium">ASSIST</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-slate-400"></div>
-            <span className="text-slate-700">Grande (&gt;€150K)</span>
+          <div className="flex items-center gap-1">
+            <span>📚</span>
+            <span className="text-amber-600 font-medium">AUGMENT</span>
           </div>
-          <span className="ml-4 text-slate-500">|</span>
-          <span className="font-semibold text-slate-700">Número = Prioridad estratégica</span>
+          <span className="text-slate-400">|</span>
+          <span className="font-semibold text-slate-700">Tamaño = Ahorro TCO</span>
+          <span className="text-slate-400">|</span>
+          <span className="font-semibold text-slate-700">Número = Ranking</span>
         </div>
       </div>
 
@@ -447,10 +453,10 @@ const OpportunityMatrixPro: React.FC<OpportunityMatrixProProps> = ({ data, heatm
 
       {/* Methodology Footer */}
       <MethodologyFooter
-        sources="Análisis interno de procesos operacionales | Benchmarks de implementación: Gartner Magic Quadrant for CCaaS 2024, Forrester Wave Contact Center 2024"
-        methodology="Impacto: Basado en % reducción de AHT, mejora de FCR, y reducción de costes operacionales | Factibilidad: Evaluación de complejidad técnica (40%), cambio organizacional (30%), inversión requerida (30%) | Priorización: Score = (Impacto/10) × (Factibilidad/10) × (Ahorro/Max Ahorro)"
-        notes="Ahorros calculados en escenario conservador (base case) sin incluir upside potencial | ROI calculado a 3 años con tasa de descuento 10%"
-        lastUpdated="Enero 2025"
+        sources="Agentic Readiness Score (5 factores ponderados) | Modelo TCO con CPI diferenciado por tier"
+        methodology="Factibilidad = Agentic Score (0-10) | Impacto = Ahorro TCO anual según tier: AUTOMATE (Vol/11×12×70%×€2.18), ASSIST (×30%×€0.83), AUGMENT (×15%×€0.33)"
+        notes="Top 10 iniciativas ordenadas por potencial económico | CPI: Humano €2.33, Bot €0.15, Assist €1.50, Augment €2.00"
+        lastUpdated="Enero 2026"
       />
     </div>
   );

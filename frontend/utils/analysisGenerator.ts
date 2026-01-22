@@ -1,6 +1,6 @@
 // analysisGenerator.ts - v2.0 con 6 dimensiones
 import type { AnalysisData, Kpi, DimensionAnalysis, HeatmapDataPoint, Opportunity, RoadmapInitiative, EconomicModelData, BenchmarkDataPoint, Finding, Recommendation, TierKey, CustomerSegment, RawInteraction, DrilldownDataPoint, AgenticTier } from '../types';
-import { generateAnalysisFromRealData, calculateDrilldownMetrics, generateOpportunitiesFromDrilldown, generateRoadmapFromDrilldown } from './realDataAnalysis';
+import { generateAnalysisFromRealData, calculateDrilldownMetrics, generateOpportunitiesFromDrilldown, generateRoadmapFromDrilldown, calculateSkillMetrics, generateHeatmapFromMetrics, clasificarTierSimple } from './realDataAnalysis';
 import { RoadmapPhase } from '../types';
 import { BarChartHorizontal, Zap, Target, Brain, Bot } from 'lucide-react';
 import { calculateAgenticReadinessScore, type AgenticReadinessInput } from './agenticReadinessV2';
@@ -9,7 +9,7 @@ import {
   mapBackendResultsToAnalysisData,
   buildHeatmapFromBackend,
 } from './backendMapper';
-import { saveFileToServerCache, saveDrilldownToServerCache, getCachedDrilldown } from './serverCache';
+import { saveFileToServerCache, saveDrilldownToServerCache, getCachedDrilldown, downloadCachedFile } from './serverCache';
 
 
 
@@ -532,9 +532,12 @@ const generateHeatmapData = (
         const transfer_rate = randomInt(5, 35); // %
         const fcr_approx = 100 - transfer_rate; // FCR aproximado
         
-        // Coste anual
-        const annual_volume = volume * 12;
-        const annual_cost = Math.round(annual_volume * aht_mean * COST_PER_SECOND);
+        // Coste del período (mensual) - con factor de productividad 70%
+        const effectiveProductivity = 0.70;
+        const period_cost = Math.round((aht_mean / 3600) * costPerHour * volume / effectiveProductivity);
+        const annual_cost = period_cost;  // Renombrado por compatibilidad, pero es coste mensual
+        // CPI = coste por interacción
+        const cpi = volume > 0 ? period_cost / volume : 0;
         
         // === NUEVA LÓGICA: 3 DIMENSIONES ===
         
@@ -597,6 +600,7 @@ const generateHeatmapData = (
             skill,
             segment,
             volume,
+            cost_volume: volume,  // En datos sintéticos, asumimos que todos son non-abandon
             aht_seconds: aht_mean, // Renombrado para compatibilidad
             metrics: {
                 fcr: isNaN(fcr_approx) ? 0 : Math.max(0, Math.min(100, Math.round(fcr_approx))),
@@ -606,6 +610,7 @@ const generateHeatmapData = (
                 transfer_rate: isNaN(transfer_rate) ? 0 : Math.max(0, Math.min(100, Math.round(transfer_rate * 100)))
             },
             annual_cost,
+            cpi,
             variability: {
                 cv_aht: Math.round(cv_aht * 100), // Convertir a porcentaje
                 cv_talk_time: 0, // Deprecado en v2.1
@@ -622,29 +627,6 @@ const generateHeatmapData = (
             readiness_category
         };
     });
-};
-
-// v3.0: Oportunidades con nuevas dimensiones
-const generateOpportunityMatrixData = (): Opportunity[] => {
-    const opportunities = [
-        { id: 'opp1', name: 'Automatizar consulta de pedidos', savings: 85000, dimensionId: 'agentic_readiness', customer_segment: 'medium' as CustomerSegment },
-        { id: 'opp2', name: 'Implementar Knowledge Base dinámica', savings: 45000, dimensionId: 'operational_efficiency', customer_segment: 'high' as CustomerSegment },
-        { id: 'opp3', name: 'Chatbot de triaje inicial', savings: 120000, dimensionId: 'effectiveness_resolution', customer_segment: 'medium' as CustomerSegment },
-        { id: 'opp4', name: 'Reducir complejidad en colas críticas', savings: 30000, dimensionId: 'complexity_predictability', customer_segment: 'high' as CustomerSegment },
-        { id: 'opp5', name: 'Cobertura 24/7 con agentes virtuales', savings: 65000, dimensionId: 'volumetry_distribution', customer_segment: 'low' as CustomerSegment },
-    ];
-    return opportunities.map(opp => ({ ...opp, impact: randomInt(3, 10), feasibility: randomInt(2, 9) }));
-};
-
-// v3.0: Roadmap con nuevas dimensiones
-const generateRoadmapData = (): RoadmapInitiative[] => {
-    return [
-        { id: 'r1', name: 'Chatbot de estado de pedido', phase: RoadmapPhase.Automate, timeline: 'Q1 2025', investment: 25000, resources: ['1x Bot Developer', 'API Access'], dimensionId: 'agentic_readiness', risk: 'low' },
-        { id: 'r2', name: 'Implementar Knowledge Base dinámica', phase: RoadmapPhase.Assist, timeline: 'Q1 2025', investment: 15000, resources: ['1x PM', 'Content Team'], dimensionId: 'operational_efficiency', risk: 'low' },
-        { id: 'r3', name: 'Agent Assist para sugerencias en real-time', phase: RoadmapPhase.Assist, timeline: 'Q2 2025', investment: 45000, resources: ['2x AI Devs', 'QA Team'], dimensionId: 'effectiveness_resolution', risk: 'medium' },
-        { id: 'r4', name: 'Estandarización de procesos complejos', phase: RoadmapPhase.Augment, timeline: 'Q3 2025', investment: 30000, resources: ['Process Analyst', 'Training Team'], dimensionId: 'complexity_predictability', risk: 'medium' },
-        { id: 'r5', name: 'Cobertura 24/7 con agentes virtuales', phase: RoadmapPhase.Augment, timeline: 'Q4 2025', investment: 75000, resources: ['Lead AI Engineer', 'Data Scientist'], dimensionId: 'volumetry_distribution', risk: 'high' },
-    ];
 };
 
 // v2.0: Añadir NPV y costBreakdown
@@ -690,123 +672,6 @@ const generateEconomicModelData = (): EconomicModelData => {
         costBreakdown
     };
 };
-
-// v2.x: Generar Opportunity Matrix a partir de datos REALES (heatmap + modelo económico)
-const generateOpportunitiesFromHeatmap = (
-  heatmapData: HeatmapDataPoint[],
-  economicModel?: EconomicModelData
-): Opportunity[] => {
-  if (!heatmapData || heatmapData.length === 0) return [];
-
-  // Ahorro anual total calculado por el backend (si existe)
-  const globalSavings = economicModel?.annualSavings ?? 0;
-
-  // 1) Calculamos un "peso" por skill en función de:
-  //    - coste anual
-  //    - ineficiencia (FCR bajo)
-  //    - readiness (facilidad para automatizar)
-  const scored = heatmapData.map((h) => {
-    const annualCost = h.annual_cost ?? 0;
-    const readiness = h.automation_readiness ?? 0;
-    const fcrScore = h.metrics?.fcr ?? 0;
-
-    // FCR bajo => más ineficiencia
-    const ineffPenalty = Math.max(0, 100 - fcrScore); // 0–100
-    // Peso base: coste alto + ineficiencia alta + readiness alto
-    const baseWeight =
-      annualCost *
-      (1 + ineffPenalty / 100) *
-      (0.3 + 0.7 * (readiness / 100));
-
-    const weight = !Number.isFinite(baseWeight) || baseWeight < 0 ? 0 : baseWeight;
-
-    return { heat: h, weight };
-  });
-
-  const totalWeight =
-    scored.reduce((sum, s) => sum + s.weight, 0) || 1;
-
-  // 2) Asignamos "savings" (ahorro potencial) por skill
-  const opportunitiesWithSavings = scored.map((s) => {
-    const { heat } = s;
-    const annualCost = heat.annual_cost ?? 0;
-
-    // Si el backend nos da un ahorro anual total, lo distribuimos proporcionalmente
-    const savings =
-      globalSavings > 0 && totalWeight > 0
-        ? (globalSavings * s.weight) / totalWeight
-        : // Si no hay dato de ahorro global, suponemos un 20% del coste anual
-          annualCost * 0.2;
-
-    return {
-      heat,
-      savings: Math.max(0, savings),
-    };
-  });
-
-  const maxSavings =
-    opportunitiesWithSavings.reduce(
-      (max, s) => (s.savings > max ? s.savings : max),
-      0
-    ) || 1;
-
-  // 3) Construimos cada oportunidad
-  return opportunitiesWithSavings.map((item, index) => {
-    const { heat, savings } = item;
-    const skillName = heat.skill || `Skill ${index + 1}`;
-
-    // Impacto: relativo al mayor ahorro
-    const impactRaw = (savings / maxSavings) * 10;
-    const impact = Math.max(
-      3,
-      Math.min(10, Math.round(impactRaw))
-    );
-
-    // Factibilidad base: a partir del automation_readiness (0–100)
-    const readiness = heat.automation_readiness ?? 0;
-    const feasibilityRaw = (readiness / 100) * 7 + 3; // 3–10
-    const feasibility = Math.max(
-      3,
-      Math.min(10, Math.round(feasibilityRaw))
-    );
-
-    // Dimensión a la que lo vinculamos
-    const dimensionId =
-      readiness >= 70
-        ? 'agentic_readiness'
-        : readiness >= 40
-        ? 'effectiveness_resolution'
-        : 'complexity_predictability';
-
-    // Segmento de cliente (high/medium/low) si lo tenemos
-    const customer_segment = heat.segment;
-
-    // Nombre legible que incluye el skill -> esto ayuda a
-    // OpportunityMatrixPro a encontrar el skill en el heatmap
-    const namePrefix =
-      readiness >= 70
-        ? 'Automatizar '
-        : readiness >= 40
-        ? 'Asistir con IA en '
-        : 'Optimizar procesos en ';
-
-    const idSlug = skillName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-
-    return {
-      id: `opp_${index + 1}_${idSlug}`,
-      name: `${namePrefix}${skillName}`,
-      impact,
-      feasibility,
-      savings: Math.round(savings),
-      dimensionId,
-      customer_segment,
-    };
-  });
-};
-
 
 // v2.0: Añadir percentiles múltiples
 const generateBenchmarkData = (): BenchmarkDataPoint[] => {
@@ -929,27 +794,41 @@ export const generateAnalysis = async (
       // Añadir dateRange extraído del archivo
       mapped.dateRange = dateRange;
 
-      // Heatmap: primero lo construimos a partir de datos reales del backend
-      mapped.heatmapData = buildHeatmapFromBackend(
-        raw,
-        costPerHour,
-        avgCsat,
-        segmentMapping
-      );
+      // Heatmap: usar cálculos del frontend (parsedInteractions) para consistencia
+      // Esto asegura que dashboard muestre los mismos valores que los logs de realDataAnalysis
+      if (parsedInteractions && parsedInteractions.length > 0) {
+        const skillMetrics = calculateSkillMetrics(parsedInteractions, costPerHour);
+        mapped.heatmapData = generateHeatmapFromMetrics(skillMetrics, avgCsat, segmentMapping);
+        console.log('📊 Heatmap generado desde frontend (parsedInteractions) - métricas consistentes');
+      } else {
+        // Fallback: usar backend si no hay parsedInteractions
+        mapped.heatmapData = buildHeatmapFromBackend(
+          raw,
+          costPerHour,
+          avgCsat,
+          segmentMapping
+        );
+        console.log('📊 Heatmap generado desde backend (fallback - sin parsedInteractions)');
+      }
 
       // v3.5: Calcular drilldownData PRIMERO (necesario para opportunities y roadmap)
       if (parsedInteractions && parsedInteractions.length > 0) {
         mapped.drilldownData = calculateDrilldownMetrics(parsedInteractions, costPerHour);
         console.log(`📊 Drill-down calculado: ${mapped.drilldownData.length} skills, ${mapped.drilldownData.filter(d => d.isPriorityCandidate).length} candidatos prioritarios`);
 
-        // Cachear drilldownData en el servidor para uso futuro (no bloquea)
+        // v4.4: Cachear drilldownData en el servidor ANTES de retornar (fix: era fire-and-forget)
+        // Esto asegura que el cache esté disponible cuando el usuario haga "Usar Cache"
         if (authHeaderOverride && mapped.drilldownData.length > 0) {
-          saveDrilldownToServerCache(authHeaderOverride, mapped.drilldownData)
-            .then(success => {
-              if (success) console.log('💾 DrilldownData cacheado en servidor');
-              else console.warn('⚠️ No se pudo cachear drilldownData');
-            })
-            .catch(err => console.warn('⚠️ Error cacheando drilldownData:', err));
+          try {
+            const cacheSuccess = await saveDrilldownToServerCache(authHeaderOverride, mapped.drilldownData);
+            if (cacheSuccess) {
+              console.log('💾 DrilldownData cacheado en servidor correctamente');
+            } else {
+              console.warn('⚠️ No se pudo cachear drilldownData - fallback a heatmap en próximo uso');
+            }
+          } catch (cacheErr) {
+            console.warn('⚠️ Error cacheando drilldownData:', cacheErr);
+          }
         }
 
         // Usar oportunidades y roadmap basados en drilldownData (datos reales)
@@ -957,13 +836,11 @@ export const generateAnalysis = async (
         mapped.roadmap = generateRoadmapFromDrilldown(mapped.drilldownData, costPerHour);
         console.log(`📊 Opportunities: ${mapped.opportunities.length}, Roadmap: ${mapped.roadmap.length}`);
       } else {
-        console.warn('⚠️ No hay interacciones parseadas, usando heatmap para opportunities');
-        // Fallback: usar heatmap (menos preciso)
-        mapped.opportunities = generateOpportunitiesFromHeatmap(
-          mapped.heatmapData,
-          mapped.economicModel
-        );
-        mapped.roadmap = generateRoadmapData();
+        console.warn('⚠️ No hay interacciones parseadas, usando heatmap para drilldown');
+        // v4.3: Generar drilldownData desde heatmap para usar mismas funciones
+        mapped.drilldownData = generateDrilldownFromHeatmap(mapped.heatmapData, costPerHour);
+        mapped.opportunities = generateOpportunitiesFromDrilldown(mapped.drilldownData, costPerHour);
+        mapped.roadmap = generateRoadmapFromDrilldown(mapped.drilldownData, costPerHour);
       }
 
       // Findings y recommendations
@@ -1162,16 +1039,62 @@ export const generateAnalysisFromCache = async (
       mapped.roadmap = generateRoadmapFromDrilldown(mapped.drilldownData, costPerHour);
       console.log(`📊 Opportunities: ${mapped.opportunities.length}, Roadmap: ${mapped.roadmap.length}`);
     } else if (mapped.heatmapData && mapped.heatmapData.length > 0) {
-      // Fallback: usar heatmap (solo 9 skills agregados)
-      console.warn('⚠️ Sin drilldownData cacheado, usando heatmap fallback');
-      mapped.drilldownData = generateDrilldownFromHeatmap(mapped.heatmapData, costPerHour);
-      console.log(`📊 Drill-down desde heatmap (fallback): ${mapped.drilldownData.length} skills`);
+      // v4.5: No hay drilldownData cacheado - intentar calcularlo desde el CSV cacheado
+      console.log('⚠️ No cached drilldownData found, attempting to calculate from cached CSV...');
 
-      mapped.opportunities = generateOpportunitiesFromHeatmap(
-        mapped.heatmapData,
-        mapped.economicModel
-      );
-      mapped.roadmap = generateRoadmapData();
+      let calculatedDrilldown = false;
+
+      try {
+        // Descargar y parsear el CSV cacheado para calcular drilldown real
+        const cachedFile = await downloadCachedFile(authHeaderOverride);
+        if (cachedFile) {
+          console.log(`📥 Downloaded cached CSV: ${(cachedFile.size / 1024 / 1024).toFixed(2)} MB`);
+
+          const { parseFile } = await import('./fileParser');
+          const parsedInteractions = await parseFile(cachedFile);
+
+          if (parsedInteractions && parsedInteractions.length > 0) {
+            console.log(`📊 Parsed ${parsedInteractions.length} interactions from cached CSV`);
+
+            // Calcular drilldown real desde interacciones
+            mapped.drilldownData = calculateDrilldownMetrics(parsedInteractions, costPerHour);
+            console.log(`📊 Calculated drilldown: ${mapped.drilldownData.length} skills`);
+
+            // Guardar drilldown en cache para próximo uso
+            try {
+              const saveSuccess = await saveDrilldownToServerCache(authHeaderOverride, mapped.drilldownData);
+              if (saveSuccess) {
+                console.log('💾 DrilldownData saved to cache for future use');
+              } else {
+                console.warn('⚠️ Failed to save drilldownData to cache');
+              }
+            } catch (saveErr) {
+              console.warn('⚠️ Error saving drilldownData to cache:', saveErr);
+            }
+
+            calculatedDrilldown = true;
+          }
+        }
+      } catch (csvErr) {
+        console.warn('⚠️ Could not calculate drilldown from cached CSV:', csvErr);
+      }
+
+      if (!calculatedDrilldown) {
+        // Fallback final: usar heatmap (datos aproximados)
+        console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.warn('⚠️ FALLBACK ACTIVO: No hay drilldownData cacheado');
+        console.warn('   Causa probable: El CSV no se subió correctamente o la caché expiró');
+        console.warn('   Consecuencia: Usando datos agregados del heatmap (menos precisos)');
+        console.warn('   Solución: Vuelva a subir el archivo CSV para obtener datos completos');
+        console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+        mapped.drilldownData = generateDrilldownFromHeatmap(mapped.heatmapData, costPerHour);
+        console.log(`📊 Drill-down desde heatmap (fallback): ${mapped.drilldownData.length} skills agregados`);
+      }
+
+      // Usar mismas funciones que ruta fresh para consistencia
+      mapped.opportunities = generateOpportunitiesFromDrilldown(mapped.drilldownData, costPerHour);
+      mapped.roadmap = generateRoadmapFromDrilldown(mapped.drilldownData, costPerHour);
     }
 
     // Findings y recommendations
@@ -1201,15 +1124,21 @@ function generateDrilldownFromHeatmap(
     const cvAht = hp.variability?.cv_aht || 0;
     const transferRate = hp.variability?.transfer_rate || hp.metrics?.transfer_rate || 0;
     const fcrRate = hp.metrics?.fcr || 0;
+    // FCR Técnico: usar el campo si existe, sino calcular como 100 - transfer_rate
+    const fcrTecnico = hp.metrics?.fcr_tecnico ?? (100 - transferRate);
     const agenticScore = hp.dimensions
       ? (hp.dimensions.predictability * 0.4 + hp.dimensions.complexity_inverse * 0.35 + hp.dimensions.repetitivity * 0.25)
       : (hp.automation_readiness || 0) / 10;
 
-    // Determinar tier basado en el score
-    let tier: AgenticTier = 'HUMAN-ONLY';
-    if (agenticScore >= 7.5) tier = 'AUTOMATE';
-    else if (agenticScore >= 5.5) tier = 'ASSIST';
-    else if (agenticScore >= 3.5) tier = 'AUGMENT';
+    // v4.4: Usar clasificarTierSimple con TODOS los datos disponibles del heatmap
+    // cvAht, transferRate y fcrRate están en % (ej: 75), clasificarTierSimple espera decimal (ej: 0.75)
+    const tier = clasificarTierSimple(
+      agenticScore,
+      cvAht / 100,        // CV como decimal
+      transferRate / 100, // Transfer como decimal
+      fcrRate / 100,      // FCR como decimal (nuevo en v4.4)
+      hp.volume           // Volumen para red flag check (nuevo en v4.4)
+    );
 
     return {
       skill: hp.skill,
@@ -1219,6 +1148,7 @@ function generateDrilldownFromHeatmap(
       cv_aht: cvAht,
       transfer_rate: transferRate,
       fcr_rate: fcrRate,
+      fcr_tecnico: fcrTecnico,  // FCR Técnico para consistencia con Summary
       agenticScore: agenticScore,
       isPriorityCandidate: cvAht < 75,
       originalQueues: [{
@@ -1229,6 +1159,7 @@ function generateDrilldownFromHeatmap(
         cv_aht: cvAht,
         transfer_rate: transferRate,
         fcr_rate: fcrRate,
+        fcr_tecnico: fcrTecnico,  // FCR Técnico para consistencia con Summary
         agenticScore: agenticScore,
         tier: tier,
         isPriorityCandidate: cvAht < 75,
@@ -1333,21 +1264,26 @@ const generateSyntheticAnalysis = (
         hasNaN: heatmapData.some(item => 
             Object.values(item.metrics).some(v => isNaN(v))
         )
-    });  
+    });
+
+  // v4.3: Generar drilldownData desde heatmap para usar mismas funciones
+  const drilldownData = generateDrilldownFromHeatmap(heatmapData, costPerHour);
+
   return {
     tier,
     overallHealthScore,
     summaryKpis,
     dimensions,
     heatmapData,
+    drilldownData,
     agenticReadiness,
     findings: generateFindingsFromTemplates(),
     recommendations: generateRecommendationsFromTemplates(),
-    opportunities: generateOpportunityMatrixData(),
+    opportunities: generateOpportunitiesFromDrilldown(drilldownData, costPerHour),
     economicModel: generateEconomicModelData(),
-    roadmap: generateRoadmapData(),
+    roadmap: generateRoadmapFromDrilldown(drilldownData, costPerHour),
     benchmarkData: generateBenchmarkData(),
-    source: 'synthetic', 
+    source: 'synthetic',
   };
 };
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ChevronRight, TrendingUp, TrendingDown, Minus, AlertTriangle, Lightbulb, DollarSign } from 'lucide-react';
+import { ChevronRight, TrendingUp, TrendingDown, Minus, AlertTriangle, Lightbulb, DollarSign, Clock } from 'lucide-react';
 import type { AnalysisData, DimensionAnalysis, Finding, Recommendation, HeatmapDataPoint } from '../../types';
 import {
   Card,
@@ -20,7 +20,7 @@ interface DimensionAnalysisTabProps {
   data: AnalysisData;
 }
 
-// ========== ANÁLISIS CAUSAL CON IMPACTO ECONÓMICO ==========
+// ========== HALLAZGO CLAVE CON IMPACTO ECONÓMICO ==========
 
 interface CausalAnalysis {
   finding: string;
@@ -34,20 +34,44 @@ interface CausalAnalysis {
 interface CausalAnalysisExtended extends CausalAnalysis {
   impactFormula?: string;  // Explicación de cómo se calculó el impacto
   hasRealData: boolean;    // True si hay datos reales para calcular
+  timeSavings?: string;    // Ahorro de tiempo para dar credibilidad al impacto económico
 }
 
-// Genera análisis causal basado en dimensión y datos
+// Genera hallazgo clave basado en dimensión y datos
 function generateCausalAnalysis(
   dimension: DimensionAnalysis,
   heatmapData: HeatmapDataPoint[],
-  economicModel: { currentAnnualCost: number }
+  economicModel: { currentAnnualCost: number },
+  staticConfig?: { cost_per_hour: number },
+  dateRange?: { min: string; max: string }
 ): CausalAnalysisExtended[] {
   const analyses: CausalAnalysisExtended[] = [];
   const totalVolume = heatmapData.reduce((sum, h) => sum + h.volume, 0);
 
-  // v3.11: CPI basado en modelo TCO (€2.33/interacción)
+  // Coste horario del agente desde config (default €20 si no está definido)
+  const HOURLY_COST = staticConfig?.cost_per_hour ?? 20;
+
+  // Calcular factor de anualización basado en el período de datos
+  // Si tenemos dateRange, calculamos cuántos días cubre y extrapolamos a año
+  let annualizationFactor = 1; // Por defecto, asumimos que los datos ya son anuales
+  if (dateRange?.min && dateRange?.max) {
+    const startDate = new Date(dateRange.min);
+    const endDate = new Date(dateRange.max);
+    const daysCovered = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    annualizationFactor = 365 / daysCovered;
+  }
+
+  // v3.11: CPI consistente con Executive Summary
   const CPI_TCO = 2.33;
-  const CPI = totalVolume > 0 ? economicModel.currentAnnualCost / (totalVolume * 12) : CPI_TCO;
+  // Usar CPI pre-calculado de heatmapData si existe, sino calcular desde annual_cost/cost_volume
+  const totalCostVolume = heatmapData.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0);
+  const totalAnnualCost = heatmapData.reduce((sum, h) => sum + (h.annual_cost || 0), 0);
+  const hasCpiField = heatmapData.some(h => h.cpi !== undefined && h.cpi > 0);
+  const CPI = hasCpiField
+    ? (totalCostVolume > 0
+        ? heatmapData.reduce((sum, h) => sum + (h.cpi || 0) * (h.cost_volume || h.volume), 0) / totalCostVolume
+        : CPI_TCO)
+    : (totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : CPI_TCO);
 
   // Calcular métricas agregadas
   const avgCVAHT = totalVolume > 0
@@ -56,8 +80,10 @@ function generateCausalAnalysis(
   const avgTransferRate = totalVolume > 0
     ? heatmapData.reduce((sum, h) => sum + (h.variability?.transfer_rate || 0) * h.volume, 0) / totalVolume
     : 0;
+  // Usar FCR Técnico (100 - transfer_rate) en lugar de FCR Real (con filtro recontacto 7d)
+  // FCR Técnico es más comparable con benchmarks de industria
   const avgFCR = totalVolume > 0
-    ? heatmapData.reduce((sum, h) => sum + h.metrics.fcr * h.volume, 0) / totalVolume
+    ? heatmapData.reduce((sum, h) => sum + (h.metrics.fcr_tecnico ?? (100 - h.metrics.transfer_rate)) * h.volume, 0) / totalVolume
     : 0;
   const avgAHT = totalVolume > 0
     ? heatmapData.reduce((sum, h) => sum + h.aht_seconds * h.volume, 0) / totalVolume
@@ -71,77 +97,112 @@ function generateCausalAnalysis(
 
   // Skills con problemas específicos
   const skillsHighCV = heatmapData.filter(h => (h.variability?.cv_aht || 0) > 100);
-  const skillsLowFCR = heatmapData.filter(h => h.metrics.fcr < 50);
+  // Usar FCR Técnico para identificar skills con bajo FCR
+  const skillsLowFCR = heatmapData.filter(h => (h.metrics.fcr_tecnico ?? (100 - h.metrics.transfer_rate)) < 50);
   const skillsHighTransfer = heatmapData.filter(h => (h.variability?.transfer_rate || 0) > 20);
+
+  // Parsear P50 AHT del KPI del header para consistencia visual
+  // El KPI puede ser "345s (P50)" o similar
+  const parseKpiAhtSeconds = (kpiValue: string): number | null => {
+    const match = kpiValue.match(/(\d+)s/);
+    return match ? parseInt(match[1], 10) : null;
+  };
 
   switch (dimension.name) {
     case 'operational_efficiency':
-      // Análisis de variabilidad AHT
-      if (avgCVAHT > 80) {
-        const inefficiencyPct = Math.min(0.15, (avgCVAHT - 60) / 200);
-        const inefficiencyCost = Math.round(economicModel.currentAnnualCost * inefficiencyPct);
+      // Obtener P50 AHT del header para mostrar valor consistente
+      const p50Aht = parseKpiAhtSeconds(dimension.kpi.value) ?? avgAHT;
+
+      // Eficiencia Operativa: enfocada en AHT (valor absoluto)
+      // CV AHT se analiza en Complejidad & Predictibilidad (best practice)
+      const hasHighAHT = p50Aht > 300; // 5:00 benchmark
+      const ahtBenchmark = 300; // 5:00 objetivo
+
+      if (hasHighAHT) {
+        // Calcular impacto económico por AHT excesivo
+        const excessSeconds = p50Aht - ahtBenchmark;
+        const annualVolume = Math.round(totalVolume * annualizationFactor);
+        const excessHours = Math.round((excessSeconds / 3600) * annualVolume);
+        const ahtExcessCost = Math.round(excessHours * HOURLY_COST);
+
+        // Estimar ahorro con solución Copilot (25-30% reducción AHT)
+        const copilotSavings = Math.round(ahtExcessCost * 0.28);
+
+        // Causa basada en AHT elevado
+        const cause = 'Agentes dedican tiempo excesivo a búsqueda manual de información, navegación entre sistemas y tareas repetitivas.';
+
         analyses.push({
-          finding: `Variabilidad AHT elevada: CV ${avgCVAHT.toFixed(0)}% (benchmark: <60%)`,
-          probableCause: skillsHighCV.length > 0
-            ? `Falta de scripts estandarizados en ${skillsHighCV.slice(0, 3).map(s => s.skill).join(', ')}. Agentes manejan casos similares de formas muy diferentes.`
-            : 'Procesos no documentados y falta de guías de atención claras.',
-          economicImpact: inefficiencyCost,
-          impactFormula: `Coste anual × ${(inefficiencyPct * 100).toFixed(1)}% ineficiencia = €${(economicModel.currentAnnualCost/1000).toFixed(0)}K × ${(inefficiencyPct * 100).toFixed(1)}%`,
-          recommendation: 'Crear playbooks por tipología de consulta y certificar agentes en procesos estándar.',
-          severity: avgCVAHT > 120 ? 'critical' : 'warning',
+          finding: `AHT elevado: P50 ${Math.floor(p50Aht / 60)}:${String(Math.round(p50Aht) % 60).padStart(2, '0')} (benchmark: 5:00)`,
+          probableCause: cause,
+          economicImpact: ahtExcessCost,
+          impactFormula: `${excessHours.toLocaleString()}h × €${HOURLY_COST}/h`,
+          timeSavings: `${excessHours.toLocaleString()} horas/año en exceso de AHT`,
+          recommendation: `Desplegar Copilot IA para agentes: (1) Auto-búsqueda en KB; (2) Sugerencias contextuales en tiempo real; (3) Scripts guiados para casos frecuentes. Reducción esperada: 20-30% AHT. Ahorro: ${formatCurrency(copilotSavings)}/año.`,
+          severity: p50Aht > 420 ? 'critical' : 'warning',
           hasRealData: true
         });
-      }
-
-      // Análisis de AHT absoluto
-      if (avgAHT > 420) {
-        const excessSeconds = avgAHT - 360;
-        const excessCost = Math.round((excessSeconds / 3600) * totalVolume * 12 * 25);
+      } else {
+        // AHT dentro de benchmark - mostrar estado positivo
         analyses.push({
-          finding: `AHT elevado: ${Math.floor(avgAHT / 60)}:${String(Math.round(avgAHT) % 60).padStart(2, '0')} (benchmark: 6:00)`,
-          probableCause: 'Sistemas de información fragmentados, búsquedas manuales excesivas, o falta de herramientas de asistencia al agente.',
-          economicImpact: excessCost,
-          impactFormula: `Exceso ${Math.round(excessSeconds)}s × ${totalVolume.toLocaleString()} int/mes × 12 × €25/h`,
-          recommendation: 'Implementar vista unificada de cliente y herramientas de sugerencia automática.',
-          severity: avgAHT > 540 ? 'critical' : 'warning',
+          finding: `AHT dentro de benchmark: P50 ${Math.floor(p50Aht / 60)}:${String(Math.round(p50Aht) % 60).padStart(2, '0')} (benchmark: 5:00)`,
+          probableCause: 'Tiempos de gestión eficientes. Procesos operativos optimizados.',
+          economicImpact: 0,
+          impactFormula: 'Sin exceso de coste por AHT',
+          timeSavings: 'Operación eficiente',
+          recommendation: 'Mantener nivel actual. Considerar Copilot para mejora continua y reducción adicional de tiempos en casos complejos.',
+          severity: 'info',
           hasRealData: true
         });
       }
       break;
 
     case 'effectiveness_resolution':
-      // Análisis de FCR
+      // Análisis principal: FCR Técnico y tasa de transferencias
+      const annualVolumeEff = Math.round(totalVolume * annualizationFactor);
+      const transferCount = Math.round(annualVolumeEff * (avgTransferRate / 100));
+
+      // Calcular impacto económico de transferencias
+      const transferCostTotal = Math.round(transferCount * CPI_TCO * 0.5);
+
+      // Potencial de mejora con IA
+      const improvementPotential = avgFCR < 90 ? Math.round((90 - avgFCR) / 100 * annualVolumeEff) : 0;
+      const potentialSavingsEff = Math.round(improvementPotential * CPI_TCO * 0.3);
+
+      // Determinar severidad basada en FCR
+      const effSeverity = avgFCR < 70 ? 'critical' : avgFCR < 85 ? 'warning' : 'info';
+
+      // Construir causa basada en datos
+      let effCause = '';
       if (avgFCR < 70) {
-        const recontactRate = (100 - avgFCR) / 100;
-        const recontactCost = Math.round(totalVolume * 12 * recontactRate * CPI_TCO);
-        analyses.push({
-          finding: `FCR bajo: ${avgFCR.toFixed(0)}% (benchmark: >75%)`,
-          probableCause: skillsLowFCR.length > 0
-            ? `Agentes sin autonomía para resolver en ${skillsLowFCR.slice(0, 2).map(s => s.skill).join(', ')}. Políticas de escalado excesivamente restrictivas.`
-            : 'Falta de información completa en primer contacto o limitaciones de autoridad del agente.',
-          economicImpact: recontactCost,
-          impactFormula: `${totalVolume.toLocaleString()} int × 12 × ${(recontactRate * 100).toFixed(0)}% recontactos × €${CPI_TCO}/int`,
-          recommendation: 'Empoderar agentes con mayor autoridad de resolución y crear Knowledge Base contextual.',
-          severity: avgFCR < 50 ? 'critical' : 'warning',
-          hasRealData: true
-        });
+        effCause = skillsLowFCR.length > 0
+          ? `Alta tasa de transferencias (${avgTransferRate.toFixed(0)}%) indica falta de herramientas o autoridad. Crítico en ${skillsLowFCR.slice(0, 2).map(s => s.skill).join(', ')}.`
+          : `Transferencias elevadas (${avgTransferRate.toFixed(0)}%): agentes sin información contextual o sin autoridad para resolver.`;
+      } else if (avgFCR < 85) {
+        effCause = `Transferencias del ${avgTransferRate.toFixed(0)}% indican oportunidad de mejora con asistencia IA para casos complejos.`;
+      } else {
+        effCause = `FCR Técnico en nivel óptimo. Transferencias del ${avgTransferRate.toFixed(0)}% principalmente en casos que requieren escalación legítima.`;
       }
 
-      // Análisis de transferencias
-      if (avgTransferRate > 15) {
-        const transferCost = Math.round(totalVolume * 12 * (avgTransferRate / 100) * CPI_TCO * 0.5);
-        analyses.push({
-          finding: `Tasa de transferencias: ${avgTransferRate.toFixed(1)}% (benchmark: <10%)`,
-          probableCause: skillsHighTransfer.length > 0
-            ? `Routing inicial incorrecto hacia ${skillsHighTransfer.slice(0, 2).map(s => s.skill).join(', ')}. IVR no identifica correctamente la intención del cliente.`
-            : 'Reglas de enrutamiento desactualizadas o skills mal definidos.',
-          economicImpact: transferCost,
-          impactFormula: `${totalVolume.toLocaleString()} int × 12 × ${avgTransferRate.toFixed(1)}% × €${CPI_TCO} × 50% coste adicional`,
-          recommendation: 'Revisar árbol de IVR, actualizar reglas de ACD y capacitar agentes en resolución integral.',
-          severity: avgTransferRate > 25 ? 'critical' : 'warning',
-          hasRealData: true
-        });
+      // Construir recomendación
+      let effRecommendation = '';
+      if (avgFCR < 70) {
+        effRecommendation = `Desplegar Knowledge Copilot con búsqueda inteligente en KB + Guided Resolution Copilot para casos complejos. Objetivo: FCR >85%. Potencial ahorro: ${formatCurrency(potentialSavingsEff)}/año.`;
+      } else if (avgFCR < 85) {
+        effRecommendation = `Implementar Copilot de asistencia en tiempo real: sugerencias contextuales + conexión con expertos virtuales para reducir transferencias. Objetivo: FCR >90%.`;
+      } else {
+        effRecommendation = `Mantener nivel actual. Considerar IA para análisis de transferencias legítimas y optimización de enrutamiento predictivo.`;
       }
+
+      analyses.push({
+        finding: `FCR Técnico: ${avgFCR.toFixed(0)}% | Transferencias: ${avgTransferRate.toFixed(0)}% (benchmark: FCR >85%, Transfer <10%)`,
+        probableCause: effCause,
+        economicImpact: transferCostTotal,
+        impactFormula: `${transferCount.toLocaleString()} transferencias/año × €${CPI_TCO}/int × 50% coste adicional`,
+        timeSavings: `${transferCount.toLocaleString()} transferencias/año (${avgTransferRate.toFixed(0)}% del volumen)`,
+        recommendation: effRecommendation,
+        severity: effSeverity,
+        hasRealData: true
+      });
       break;
 
     case 'volumetry_distribution':
@@ -149,13 +210,16 @@ function generateCausalAnalysis(
       const topSkill = [...heatmapData].sort((a, b) => b.volume - a.volume)[0];
       const topSkillPct = topSkill ? (topSkill.volume / totalVolume) * 100 : 0;
       if (topSkillPct > 40 && topSkill) {
-        const deflectionPotential = Math.round(topSkill.volume * 12 * CPI_TCO * 0.20);
+        const annualTopSkillVolume = Math.round(topSkill.volume * annualizationFactor);
+        const deflectionPotential = Math.round(annualTopSkillVolume * CPI_TCO * 0.20);
+        const interactionsDeflectable = Math.round(annualTopSkillVolume * 0.20);
         analyses.push({
           finding: `Concentración de volumen: ${topSkill.skill} representa ${topSkillPct.toFixed(0)}% del total`,
-          probableCause: 'Dependencia excesiva de un skill puede indicar oportunidad de autoservicio o automatización parcial.',
+          probableCause: `Alta concentración en un skill indica consultas repetitivas con potencial de automatización.`,
           economicImpact: deflectionPotential,
-          impactFormula: `${topSkill.volume.toLocaleString()} int × 12 × €${CPI_TCO} × 20% deflexión potencial`,
-          recommendation: `Analizar top consultas de ${topSkill.skill} para identificar candidatas a deflexión digital o FAQ automatizado.`,
+          impactFormula: `${topSkill.volume.toLocaleString()} int × anualización × €${CPI_TCO} × 20% deflexión potencial`,
+          timeSavings: `${annualTopSkillVolume.toLocaleString()} interacciones/año en ${topSkill.skill} (${interactionsDeflectable.toLocaleString()} automatizables)`,
+          recommendation: `Analizar tipologías de ${topSkill.skill} para deflexión a autoservicio o agente virtual. Potencial: ${formatCurrency(deflectionPotential)}/año.`,
           severity: 'info',
           hasRealData: true
         });
@@ -163,65 +227,102 @@ function generateCausalAnalysis(
       break;
 
     case 'complexity_predictability':
-      // v3.11: Análisis de complejidad basado en hold time y CV
-      if (avgHoldTime > 45) {
-        const excessHold = avgHoldTime - 30;
-        const holdCost = Math.round((excessHold / 3600) * totalVolume * 12 * 25);
+      // KPI principal: CV AHT (predictability metric per industry standards)
+      // Siempre mostrar análisis de CV AHT ya que es el KPI de esta dimensión
+      const cvBenchmark = 75; // Best practice: CV AHT < 75%
+
+      if (avgCVAHT > cvBenchmark) {
+        const staffingCost = Math.round(economicModel.currentAnnualCost * 0.03);
+        const staffingHours = Math.round(staffingCost / HOURLY_COST);
+        const standardizationSavings = Math.round(staffingCost * 0.50);
+
+        // Determinar severidad basada en CV AHT
+        const cvSeverity = avgCVAHT > 125 ? 'critical' : avgCVAHT > 100 ? 'warning' : 'warning';
+
+        // Causa dinámica basada en nivel de variabilidad
+        const cvCause = avgCVAHT > 125
+          ? 'Dispersión extrema en tiempos de atención impide planificación efectiva de recursos. Probable falta de scripts o procesos estandarizados.'
+          : 'Variabilidad moderada en tiempos indica oportunidad de estandarización para mejorar planificación WFM.';
+
         analyses.push({
-          finding: `Hold time elevado: ${avgHoldTime.toFixed(0)}s promedio (benchmark: <30s)`,
-          probableCause: 'Consultas complejas requieren búsqueda de información durante la llamada. Posible falta de acceso rápido a datos o sistemas.',
-          economicImpact: holdCost,
-          impactFormula: `Exceso ${Math.round(excessHold)}s × ${totalVolume.toLocaleString()} int × 12 × €25/h`,
-          recommendation: 'Implementar acceso contextual a información del cliente y reducir sistemas fragmentados.',
-          severity: avgHoldTime > 60 ? 'critical' : 'warning',
+          finding: `CV AHT elevado: ${avgCVAHT.toFixed(0)}% (benchmark: <${cvBenchmark}%)`,
+          probableCause: cvCause,
+          economicImpact: staffingCost,
+          impactFormula: `~3% del coste operativo por ineficiencia de staffing`,
+          timeSavings: `~${staffingHours.toLocaleString()} horas/año en sobre/subdimensionamiento`,
+          recommendation: `Implementar scripts guiados por IA que estandaricen la atención. Reducción esperada: -50% variabilidad. Ahorro: ${formatCurrency(standardizationSavings)}/año.`,
+          severity: cvSeverity,
+          hasRealData: true
+        });
+      } else {
+        // CV AHT dentro de benchmark - mostrar estado positivo
+        analyses.push({
+          finding: `CV AHT dentro de benchmark: ${avgCVAHT.toFixed(0)}% (benchmark: <${cvBenchmark}%)`,
+          probableCause: 'Tiempos de atención consistentes. Buena estandarización de procesos.',
+          economicImpact: 0,
+          impactFormula: 'Sin impacto por variabilidad',
+          timeSavings: 'Planificación WFM eficiente',
+          recommendation: 'Mantener nivel actual. Analizar casos atípicos para identificar oportunidades de mejora continua.',
+          severity: 'info',
           hasRealData: true
         });
       }
 
-      if (avgCVAHT > 100) {
+      // Análisis secundario: Hold Time (proxy de complejidad)
+      if (avgHoldTime > 45) {
+        const excessHold = avgHoldTime - 30;
+        const annualVolumeHold = Math.round(totalVolume * annualizationFactor);
+        const excessHoldHours = Math.round((excessHold / 3600) * annualVolumeHold);
+        const holdCost = Math.round(excessHoldHours * HOURLY_COST);
+        const searchCopilotSavings = Math.round(holdCost * 0.60);
         analyses.push({
-          finding: `Alta impredecibilidad: CV AHT ${avgCVAHT.toFixed(0)}% (benchmark: <75%)`,
-          probableCause: 'Procesos con alta variabilidad dificultan la planificación de recursos y el staffing.',
-          economicImpact: Math.round(economicModel.currentAnnualCost * 0.03),
-          impactFormula: `~3% del coste operativo por ineficiencia de staffing`,
-          recommendation: 'Segmentar procesos por complejidad y estandarizar los más frecuentes.',
-          severity: 'warning',
+          finding: `Hold time elevado: ${avgHoldTime.toFixed(0)}s promedio (benchmark: <30s)`,
+          probableCause: 'Agentes ponen cliente en espera para buscar información. Sistemas no presentan datos de forma contextual.',
+          economicImpact: holdCost,
+          impactFormula: `Exceso ${Math.round(excessHold)}s × ${totalVolume.toLocaleString()} int × anualización × €${HOURLY_COST}/h`,
+          timeSavings: `${excessHoldHours.toLocaleString()} horas/año de cliente en espera`,
+          recommendation: `Desplegar vista 360° con contexto automático: historial, productos y acciones sugeridas visibles al contestar. Reducción esperada: -60% hold time. Ahorro: ${formatCurrency(searchCopilotSavings)}/año.`,
+          severity: avgHoldTime > 60 ? 'critical' : 'warning',
           hasRealData: true
         });
       }
       break;
 
     case 'customer_satisfaction':
-      // v3.11: Solo generar análisis si hay datos de CSAT reales
+      // Solo generar análisis si hay datos de CSAT reales
       if (avgCSAT > 0) {
         if (avgCSAT < 70) {
-          // Estimación conservadora: impacto en retención
-          const churnRisk = Math.round(totalVolume * 12 * 0.02 * 50);  // 2% churn × €50 valor medio
+          const annualVolumeCsat = Math.round(totalVolume * annualizationFactor);
+          const customersAtRisk = Math.round(annualVolumeCsat * 0.02);
+          const churnRisk = Math.round(customersAtRisk * 50);
           analyses.push({
             finding: `CSAT por debajo del objetivo: ${avgCSAT.toFixed(0)}% (benchmark: >80%)`,
-            probableCause: 'Experiencia del cliente subóptima puede estar relacionada con tiempos de espera, resolución incompleta, o trato del agente.',
+            probableCause: 'Clientes insatisfechos por esperas, falta de resolución o experiencia de atención deficiente.',
             economicImpact: churnRisk,
-            impactFormula: `${totalVolume.toLocaleString()} clientes × 12 × 2% riesgo churn × €50 valor`,
-            recommendation: 'Implementar programa de voz del cliente (VoC) y cerrar loop de feedback.',
+            impactFormula: `${totalVolume.toLocaleString()} clientes × anualización × 2% riesgo churn × €50 valor`,
+            timeSavings: `${customersAtRisk.toLocaleString()} clientes/año en riesgo de fuga`,
+            recommendation: `Implementar programa VoC: encuestas post-contacto + análisis de causas raíz + acción correctiva en 48h. Objetivo: CSAT >80%.`,
             severity: avgCSAT < 50 ? 'critical' : 'warning',
             hasRealData: true
           });
         }
       }
-      // Si no hay CSAT, no generamos análisis falso
       break;
 
     case 'economy_cpi':
       // Análisis de CPI
       if (CPI > 3.5) {
         const excessCPI = CPI - CPI_TCO;
-        const potentialSavings = Math.round(totalVolume * 12 * excessCPI);
+        const annualVolumeCpi = Math.round(totalVolume * annualizationFactor);
+        const potentialSavings = Math.round(annualVolumeCpi * excessCPI);
+        const excessHours = Math.round(potentialSavings / HOURLY_COST);
         analyses.push({
           finding: `CPI por encima del benchmark: €${CPI.toFixed(2)} (objetivo: €${CPI_TCO})`,
-          probableCause: 'Combinación de AHT alto, baja productividad efectiva, o costes de personal por encima del mercado.',
+          probableCause: 'Coste por interacción elevado por AHT alto, baja ocupación o estructura de costes ineficiente.',
           economicImpact: potentialSavings,
-          impactFormula: `${totalVolume.toLocaleString()} int × 12 × €${excessCPI.toFixed(2)} exceso CPI`,
-          recommendation: 'Revisar mix de canales, optimizar procesos para reducir AHT y evaluar modelo de staffing.',
+          impactFormula: `${totalVolume.toLocaleString()} int × anualización × €${excessCPI.toFixed(2)} exceso CPI`,
+          timeSavings: `€${excessCPI.toFixed(2)} exceso/int × ${annualVolumeCpi.toLocaleString()} int = ${excessHours.toLocaleString()}h equivalentes`,
+          recommendation: `Optimizar mix de canales + reducir AHT con automatización + revisar modelo de staffing. Objetivo: CPI <€${CPI_TCO}.`,
           severity: CPI > 5 ? 'critical' : 'warning',
           hasRealData: true
         });
@@ -362,11 +463,11 @@ function DimensionCard({
         </div>
       )}
 
-      {/* Análisis Causal Completo - Solo si hay datos */}
+      {/* Hallazgo Clave - Solo si hay datos */}
       {dimension.score >= 0 && causalAnalyses.length > 0 && (
         <div className="p-4 space-y-3">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            Análisis Causal
+            Hallazgo Clave
           </h4>
           {causalAnalyses.map((analysis, idx) => {
             const config = getSeverityConfig(analysis.severity);
@@ -395,9 +496,17 @@ function DimensionCard({
                   <span className="text-xs font-bold text-red-600">
                     {formatCurrency(analysis.economicImpact)}
                   </span>
-                  <span className="text-xs text-gray-500">impacto anual estimado</span>
+                  <span className="text-xs text-gray-500">impacto anual (coste del problema)</span>
                   <span className="text-xs text-gray-400">i</span>
                 </div>
+
+                {/* Ahorro de tiempo - da credibilidad al cálculo económico */}
+                {analysis.timeSavings && (
+                  <div className="ml-6 mb-2 flex items-center gap-2">
+                    <Clock className="w-3 h-3 text-blue-500" />
+                    <span className="text-xs text-blue-700">{analysis.timeSavings}</span>
+                  </div>
+                )}
 
                 {/* Recomendación inline */}
                 <div className="ml-6 p-2 bg-white rounded border border-gray-200">
@@ -412,7 +521,7 @@ function DimensionCard({
         </div>
       )}
 
-      {/* Fallback: Hallazgos originales si no hay análisis causal - Solo si hay datos */}
+      {/* Fallback: Hallazgos originales si no hay hallazgo clave - Solo si hay datos */}
       {dimension.score >= 0 && causalAnalyses.length === 0 && findings.length > 0 && (
         <div className="p-4">
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
@@ -445,7 +554,7 @@ function DimensionCard({
         </div>
       )}
 
-      {/* Recommendations Preview - Solo si no hay análisis causal y hay datos */}
+      {/* Recommendations Preview - Solo si no hay hallazgo clave y hay datos */}
       {dimension.score >= 0 && causalAnalyses.length === 0 && recommendations.length > 0 && (
         <div className="px-4 pb-4">
           <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
@@ -473,9 +582,9 @@ export function DimensionAnalysisTab({ data }: DimensionAnalysisTabProps) {
   const getRecommendationsForDimension = (dimensionId: string) =>
     data.recommendations.filter(r => r.dimensionId === dimensionId);
 
-  // Generar análisis causal para cada dimensión
+  // Generar hallazgo clave para cada dimensión
   const getCausalAnalysisForDimension = (dimension: DimensionAnalysis) =>
-    generateCausalAnalysis(dimension, data.heatmapData, data.economicModel);
+    generateCausalAnalysis(dimension, data.heatmapData, data.economicModel, data.staticConfig, data.dateRange);
 
   // Calcular impacto total de todas las dimensiones con datos
   const impactoTotal = coreDimensions

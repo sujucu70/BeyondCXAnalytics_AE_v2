@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -23,11 +24,37 @@ router = APIRouter(
     tags=["cache"],
 )
 
-# Directory for cache files
-CACHE_DIR = Path(os.getenv("CACHE_DIR", "/data/cache"))
+# Directory for cache files - use platform-appropriate default
+def _get_default_cache_dir() -> Path:
+    """Get a platform-appropriate default cache directory."""
+    env_cache_dir = os.getenv("CACHE_DIR")
+    if env_cache_dir:
+        return Path(env_cache_dir)
+
+    # On Windows, check if C:/data/cache exists (legacy location)
+    # Otherwise use a local .cache directory relative to the backend
+    # On Unix/Docker, use /data/cache
+    if sys.platform == "win32":
+        # Check legacy location first (for backwards compatibility)
+        legacy_cache = Path("C:/data/cache")
+        if legacy_cache.exists():
+            return legacy_cache
+        # Fallback to local .cache directory in the backend folder
+        backend_dir = Path(__file__).parent.parent.parent
+        return backend_dir / ".cache"
+    else:
+        return Path("/data/cache")
+
+CACHE_DIR = _get_default_cache_dir()
 CACHED_FILE = CACHE_DIR / "cached_data.csv"
 METADATA_FILE = CACHE_DIR / "metadata.json"
 DRILLDOWN_FILE = CACHE_DIR / "drilldown_data.json"
+
+# Log cache directory on module load
+import logging
+logger = logging.getLogger(__name__)
+logger.info(f"[Cache] Using cache directory: {CACHE_DIR}")
+logger.info(f"[Cache] Drilldown file path: {DRILLDOWN_FILE}")
 
 
 class CacheMetadata(BaseModel):
@@ -158,7 +185,11 @@ def get_cached_drilldown(current_user: str = Depends(get_current_user)):
     Get the cached drilldownData JSON.
     Returns the pre-calculated drilldown data for fast cache usage.
     """
+    logger.info(f"[Cache] GET /drilldown - checking file: {DRILLDOWN_FILE}")
+    logger.info(f"[Cache] File exists: {DRILLDOWN_FILE.exists()}")
+
     if not DRILLDOWN_FILE.exists():
+        logger.warning(f"[Cache] Drilldown file not found at: {DRILLDOWN_FILE}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No cached drilldown data found"
@@ -167,8 +198,10 @@ def get_cached_drilldown(current_user: str = Depends(get_current_user)):
     try:
         with open(DRILLDOWN_FILE, "r", encoding="utf-8") as f:
             drilldown_data = json.load(f)
+        logger.info(f"[Cache] Loaded drilldown with {len(drilldown_data)} skills")
         return JSONResponse(content={"success": True, "drilldownData": drilldown_data})
     except Exception as e:
+        logger.error(f"[Cache] Error reading drilldown: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error reading drilldown data: {str(e)}"
@@ -185,16 +218,21 @@ async def save_cached_drilldown(
     Called by frontend after calculating drilldown from uploaded file.
     Receives JSON as form field.
     """
+    logger.info(f"[Cache] POST /drilldown - saving to: {DRILLDOWN_FILE}")
+    logger.info(f"[Cache] Cache directory: {CACHE_DIR}")
     ensure_cache_dir()
+    logger.info(f"[Cache] Cache dir exists after ensure: {CACHE_DIR.exists()}")
 
     try:
         # Parse and validate JSON
         drilldown_data = json.loads(drilldown_json)
+        logger.info(f"[Cache] Parsed drilldown JSON with {len(drilldown_data)} skills")
 
         # Save to file
         with open(DRILLDOWN_FILE, "w", encoding="utf-8") as f:
             json.dump(drilldown_data, f)
 
+        logger.info(f"[Cache] Drilldown saved successfully, file exists: {DRILLDOWN_FILE.exists()}")
         return JSONResponse(content={
             "success": True,
             "message": f"Cached drilldown data with {len(drilldown_data)} skills"

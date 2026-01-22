@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ShieldCheck, Info } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { DashboardHeader, TabId } from './DashboardHeader';
+import { formatDateMonthYear } from '../utils/formatters';
 import { ExecutiveSummaryTab } from './tabs/ExecutiveSummaryTab';
 import { DimensionAnalysisTab } from './tabs/DimensionAnalysisTab';
 import { AgenticReadinessTab } from './tabs/AgenticReadinessTab';
 import { RoadmapTab } from './tabs/RoadmapTab';
+import { Law10Tab } from './tabs/Law10Tab';
 import { MetodologiaDrawer } from './MetodologiaDrawer';
 import type { AnalysisData } from '../types';
 
@@ -33,6 +35,8 @@ export function DashboardTabs({
         return <AgenticReadinessTab data={data} onTabChange={setActiveTab} />;
       case 'roadmap':
         return <RoadmapTab data={data} />;
+      case 'law10':
+        return <Law10Tab data={data} onTabChange={setActiveTab} />;
       default:
         return <ExecutiveSummaryTab data={data} />;
     }
@@ -61,6 +65,7 @@ export function DashboardTabs({
         title={title}
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        onMetodologiaClick={() => setMetodologiaOpen(true)}
       />
 
       {/* Tab Content */}
@@ -84,23 +89,7 @@ export function DashboardTabs({
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm text-slate-500">
             <span className="hidden sm:inline">Beyond Diagnosis - Contact Center Analytics Platform</span>
             <span className="sm:hidden text-xs">Beyond Diagnosis</span>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <span className="text-xs sm:text-sm">
-                {data.tier ? data.tier.toUpperCase() : 'GOLD'} |
-                {data.source === 'backend' ? 'Genesys' : data.source || 'synthetic'}
-              </span>
-              <span className="hidden sm:inline text-slate-300">|</span>
-              {/* Badge Metodología */}
-              <button
-                onClick={() => setMetodologiaOpen(true)}
-                className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 bg-green-100 text-green-800 rounded-full text-[10px] sm:text-xs font-medium hover:bg-green-200 transition-colors cursor-pointer"
-              >
-                <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                <span className="hidden md:inline">Metodología de Transformación de Datos aplicada</span>
-                <span className="md:hidden">Metodología</span>
-                <Info className="w-2.5 h-2.5 sm:w-3 sm:h-3 opacity-60" />
-              </button>
-            </div>
+            <span className="text-xs sm:text-sm text-slate-400 italic">{formatDateMonthYear()}</span>
           </div>
         </div>
       </footer>

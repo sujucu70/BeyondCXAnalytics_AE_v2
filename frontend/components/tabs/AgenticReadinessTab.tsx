@@ -158,6 +158,303 @@ interface AgenticReadinessTabProps {
   onTabChange?: (tab: string) => void;
 }
 
+// ============================================
+// METHODOLOGY INTRODUCTION SECTION
+// ============================================
+
+interface TierExplanation {
+  tier: AgenticTier;
+  label: string;
+  emoji: string;
+  color: string;
+  bgColor: string;
+  description: string;
+  criteria: string;
+  recommendation: string;
+}
+
+const TIER_EXPLANATIONS: TierExplanation[] = [
+  {
+    tier: 'AUTOMATE',
+    label: 'Automatizable',
+    emoji: '🤖',
+    color: '#10b981',
+    bgColor: '#d1fae5',
+    description: 'Procesos maduros listos para automatización completa con agente virtual.',
+    criteria: 'Score ≥7.5: CV AHT <75%, Transfer <15%, Volumen >500/mes',
+    recommendation: 'Desplegar agente virtual con resolución autónoma'
+  },
+  {
+    tier: 'ASSIST',
+    label: 'Asistible',
+    emoji: '🤝',
+    color: '#3b82f6',
+    bgColor: '#dbeafe',
+    description: 'Candidatos a Copilot: IA asiste al agente humano en tiempo real.',
+    criteria: 'Score 5.5-7.5: Procesos semiestructurados con variabilidad moderada',
+    recommendation: 'Implementar Copilot con sugerencias y búsqueda inteligente'
+  },
+  {
+    tier: 'AUGMENT',
+    label: 'Optimizable',
+    emoji: '📚',
+    color: '#f59e0b',
+    bgColor: '#fef3c7',
+    description: 'Requiere herramientas y estandarización antes de automatizar.',
+    criteria: 'Score 3.5-5.5: Alta variabilidad o complejidad, necesita optimización',
+    recommendation: 'Desplegar KB mejorada, scripts guiados, herramientas de soporte'
+  },
+  {
+    tier: 'HUMAN-ONLY',
+    label: 'Solo Humano',
+    emoji: '👤',
+    color: '#6b7280',
+    bgColor: '#f3f4f6',
+    description: 'No apto para automatización: volumen insuficiente o complejidad extrema.',
+    criteria: 'Score <3.5 o Red Flags: CV >120%, Transfer >50%, Vol <50',
+    recommendation: 'Mantener gestión humana, evaluar periódicamente'
+  }
+];
+
+function AgenticMethodologyIntro({
+  tierData,
+  totalVolume,
+  totalQueues
+}: {
+  tierData: TierDataType;
+  totalVolume: number;
+  totalQueues: number;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Calcular estadísticas para el roadmap
+  const automatizableQueues = tierData.AUTOMATE.count + tierData.ASSIST.count;
+  const optimizableQueues = tierData.AUGMENT.count;
+  const humanOnlyQueues = tierData['HUMAN-ONLY'].count;
+
+  const automatizablePct = totalVolume > 0
+    ? Math.round((tierData.AUTOMATE.volume + tierData.ASSIST.volume) / totalVolume * 100)
+    : 0;
+
+  return (
+    <Card padding="none">
+      {/* Header con toggle */}
+      <div
+        className="px-5 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 cursor-pointer"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-blue-100">
+              <Info className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                ¿Qué es el Índice de Agentic Readiness?
+              </h2>
+              <p className="text-sm text-gray-600 mt-0.5">
+                Metodología de evaluación y guía de navegación de este análisis
+              </p>
+            </div>
+          </div>
+          <button className="p-2 rounded-lg hover:bg-white/50 transition-colors">
+            {isExpanded ? (
+              <ChevronUp className="w-5 h-5 text-gray-500" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-gray-500" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Contenido expandible */}
+      {isExpanded && (
+        <div className="p-5 space-y-6">
+          {/* Sección 1: Definición del índice */}
+          <div>
+            <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <Brain className="w-4 h-4 text-blue-600" />
+              Definición del Índice
+            </h3>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-sm text-gray-700 mb-3">
+                El <strong>Índice de Agentic Readiness</strong> evalúa qué porcentaje del volumen de interacciones
+                está preparado para ser gestionado por agentes virtuales o asistido por IA. Se calcula
+                analizando cada cola individualmente según 5 factores clave:
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-2 text-xs">
+                <div className="bg-white rounded p-2 border border-gray-200">
+                  <div className="font-bold text-blue-600">Predictibilidad</div>
+                  <div className="text-gray-500">30% peso</div>
+                  <div className="text-gray-600 mt-1">CV AHT &lt;75%</div>
+                </div>
+                <div className="bg-white rounded p-2 border border-gray-200">
+                  <div className="font-bold text-blue-600">Resolutividad</div>
+                  <div className="text-gray-500">25% peso</div>
+                  <div className="text-gray-600 mt-1">FCR alto, Transfer bajo</div>
+                </div>
+                <div className="bg-white rounded p-2 border border-gray-200">
+                  <div className="font-bold text-blue-600">Volumen</div>
+                  <div className="text-gray-500">25% peso</div>
+                  <div className="text-gray-600 mt-1">ROI positivo &gt;500/mes</div>
+                </div>
+                <div className="bg-white rounded p-2 border border-gray-200">
+                  <div className="font-bold text-blue-600">Calidad Datos</div>
+                  <div className="text-gray-500">10% peso</div>
+                  <div className="text-gray-600 mt-1">% registros válidos</div>
+                </div>
+                <div className="bg-white rounded p-2 border border-gray-200">
+                  <div className="font-bold text-blue-600">Simplicidad</div>
+                  <div className="text-gray-500">10% peso</div>
+                  <div className="text-gray-600 mt-1">AHT bajo, proceso simple</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Sección 2: Los 4 Tiers explicados */}
+          <div>
+            <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <BarChart2 className="w-4 h-4 text-blue-600" />
+              Las 4 Categorías de Clasificación
+            </h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Cada cola se clasifica en uno de los siguientes tiers según su score compuesto:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {TIER_EXPLANATIONS.map(tier => (
+                <div
+                  key={tier.tier}
+                  className="rounded-lg border p-3"
+                  style={{ backgroundColor: tier.bgColor, borderColor: tier.color + '40' }}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xl">{tier.emoji}</span>
+                    <span className="font-bold" style={{ color: tier.color }}>{tier.label}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: tier.color }}>
+                      {tier.tier}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-700 mb-2">{tier.description}</p>
+                  <div className="text-xs text-gray-600">
+                    <div className="mb-1"><strong>Criterios:</strong> {tier.criteria}</div>
+                    <div><strong>Acción:</strong> {tier.recommendation}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Sección 3: Roadmap de navegación */}
+          <div>
+            <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <Target className="w-4 h-4 text-blue-600" />
+              Contenido de este Análisis
+            </h3>
+            <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+              <p className="text-sm text-gray-700 mb-4">
+                Este tab presenta el análisis de automatización en el siguiente orden:
+              </p>
+
+              <div className="space-y-3">
+                {/* Paso 1 */}
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
+                    1
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">Visión Global de Distribución</div>
+                    <p className="text-xs text-gray-600">
+                      Porcentaje de volumen en cada categoría ({automatizablePct}% automatizable).
+                      Las 4 cajas muestran cómo se distribuyen las {totalVolume.toLocaleString()} interacciones.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Paso 2 */}
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center">
+                    2
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">
+                      Candidatos Prioritarios
+                      <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                        {automatizableQueues} colas
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-600">
+                      Colas AUTOMATE y ASSIST ordenadas por potencial de ahorro.
+                      Quick wins con mayor ROI para priorizar en el roadmap.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Paso 3 */}
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-amber-600 text-white text-xs font-bold flex items-center justify-center">
+                    3
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">
+                      Colas a Optimizar
+                      <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                        {optimizableQueues} colas
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-600">
+                      Tier AUGMENT: requieren estandarización previa (reducir variabilidad,
+                      mejorar FCR, documentar procesos) antes de automatizar.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Paso 4 */}
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-500 text-white text-xs font-bold flex items-center justify-center">
+                    4
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">
+                      No Automatizables
+                      <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                        {humanOnlyQueues} colas
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-600">
+                      Tier HUMAN-ONLY: volumen insuficiente (ROI negativo), calidad de datos baja,
+                      variabilidad extrema, o complejidad que requiere juicio humano.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Nota metodológica */}
+          <div className="text-xs text-gray-500 border-t border-gray-200 pt-4">
+            <strong>Nota metodológica:</strong> El índice se calcula por cola individual, no como promedio global.
+            Esto permite identificar oportunidades específicas incluso cuando la media operativa sea baja.
+            Los umbrales están calibrados según benchmarks de industria (COPC, Gartner).
+          </div>
+        </div>
+      )}
+
+      {/* Mini resumen cuando está colapsado */}
+      {!isExpanded && (
+        <div className="px-5 py-3 bg-gray-50 text-xs text-gray-600 flex items-center gap-4 flex-wrap">
+          <span><strong>5 factores</strong> ponderados</span>
+          <span>→</span>
+          <span><strong>4 categorías</strong> de clasificación</span>
+          <span>→</span>
+          <span><strong>{totalQueues} colas</strong> analizadas</span>
+          <span className="ml-auto text-blue-600 font-medium">Click para expandir metodología</span>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // Factor configuration with weights (must sum to 1.0)
 interface FactorConfig {
   id: string;
@@ -257,19 +554,6 @@ function getTierStyle(tier: AgenticTier): { bg: string; text: string; icon: Reac
         label: tier
       };
   }
-}
-
-// v3.4: Componente de badge de Tier
-function TierBadge({ tier, size = 'sm' }: { tier: AgenticTier; size?: 'sm' | 'md' }) {
-  const style = getTierStyle(tier);
-  const sizeClasses = size === 'md' ? 'px-2.5 py-1 text-xs' : 'px-2 py-0.5 text-xs';
-
-  return (
-    <span className={`inline-flex items-center gap-1 ${sizeClasses} rounded font-medium ${style.bg} ${style.text}`}>
-      {style.icon}
-      {style.label}
-    </span>
-  );
 }
 
 // v3.4: Componente de desglose de score
@@ -390,15 +674,6 @@ interface TierDataType {
   'HUMAN-ONLY': { count: number; volume: number };
 }
 
-// Colores corporativos
-const COLORS = {
-  primary: '#6d84e3',
-  dark: '#3f3f3f',
-  medium: '#b1b1b0',
-  light: '#e4e3e3',
-  white: '#ffffff'
-};
-
 // ============================================
 // v3.10: OPPORTUNITY BUBBLE CHART
 // ============================================
@@ -420,7 +695,11 @@ function calcularRadioBurbuja(volumen: number, maxVolumen: number): number {
   return minRadio + (maxRadio - minRadio) * escala;
 }
 
+// Período de datos: el volumen corresponde a 11 meses, no es mensual
+const DATA_PERIOD_MONTHS = 11;
+
 // Calcular ahorro TCO por cola
+// v4.2: Corregido para convertir volumen de 11 meses a anual
 function calcularAhorroTCO(queue: OriginalQueueMetrics): number {
   // CPI Config similar a RoadmapTab
   const CPI_HUMANO = 2.33;
@@ -436,8 +715,9 @@ function calcularAhorroTCO(queue: OriginalQueueMetrics): number {
   };
 
   const config = ratesByTier[queue.tier];
-  // Ahorro anual = volumen × 12 × rate × (CPI_humano - CPI_target)
-  const ahorroAnual = queue.volume * 12 * config.rate * (CPI_HUMANO - config.cpi);
+  // Ahorro anual = (volumen/11) × 12 × rate × (CPI_humano - CPI_target)
+  const annualVolume = (queue.volume / DATA_PERIOD_MONTHS) * 12;
+  const ahorroAnual = annualVolume * config.rate * (CPI_HUMANO - config.cpi);
   return Math.round(ahorroAnual);
 }
 
@@ -532,7 +812,8 @@ function OpportunityBubbleChart({ drilldownData }: { drilldownData: DrilldownDat
       volume: q.volume,
       ahorro: q.ahorro,
       cv: q.cv_aht,
-      fcr: q.fcr_rate,
+      // FCR Técnico para consistencia con Executive Summary (fallback: 100 - transfer_rate)
+      fcr: q.fcr_tecnico ?? (100 - q.transfer_rate),
       transfer: q.transfer_rate,
       // Escala X: score 0-10 -> 0-innerWidth
       x: (q.agenticScore / 10) * innerWidth,
@@ -1121,12 +1402,12 @@ function AgenticReadinessHeader({
     return v.toLocaleString();
   };
 
-  // Tier card config con colores corporativos
+  // Tier card config con colores consistentes con la sección introductoria
   const tierConfigs = [
-    { key: 'AUTOMATE', label: 'AUTOMATE', emoji: '🤖', sublabel: 'Full IA', color: COLORS.primary },
-    { key: 'ASSIST', label: 'ASSIST', emoji: '🤝', sublabel: 'Copilot', color: COLORS.dark },
-    { key: 'AUGMENT', label: 'AUGMENT', emoji: '📚', sublabel: 'Tools', color: COLORS.medium },
-    { key: 'HUMAN-ONLY', label: 'HUMAN', emoji: '👤', sublabel: 'Manual', color: COLORS.medium }
+    { key: 'AUTOMATE', label: 'AUTOMATE', emoji: '🤖', sublabel: 'Full IA', color: '#10b981', bgColor: '#d1fae5' },
+    { key: 'ASSIST', label: 'ASSIST', emoji: '🤝', sublabel: 'Copilot', color: '#3b82f6', bgColor: '#dbeafe' },
+    { key: 'AUGMENT', label: 'AUGMENT', emoji: '📚', sublabel: 'Tools', color: '#f59e0b', bgColor: '#fef3c7' },
+    { key: 'HUMAN-ONLY', label: 'HUMAN', emoji: '👤', sublabel: 'Manual', color: '#6b7280', bgColor: '#f3f4f6' }
   ];
 
   // Calcular porcentaje de colas AUTOMATE
@@ -1168,7 +1449,7 @@ function AgenticReadinessHeader({
           </div>
         </div>
 
-        {/* 4 Tier Cards */}
+        {/* 4 Tier Cards - colores consistentes con sección introductoria */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           {tierConfigs.map(config => {
             const tierKey = config.key as keyof TierDataType;
@@ -1179,7 +1460,7 @@ function AgenticReadinessHeader({
               <div
                 key={config.key}
                 className="rounded-lg border p-3 text-center"
-                style={{ backgroundColor: COLORS.light, borderColor: COLORS.medium }}
+                style={{ backgroundColor: config.bgColor, borderColor: config.color + '40' }}
               >
                 <div className="text-xs font-bold mb-1" style={{ color: config.color }}>
                   {config.label}
@@ -1187,13 +1468,13 @@ function AgenticReadinessHeader({
                 <div className="text-2xl font-bold" style={{ color: config.color }}>
                   {Math.round(pct)}%
                 </div>
-                <div className="text-xs mt-1" style={{ color: COLORS.medium }}>
+                <div className="text-xs mt-1 text-gray-600">
                   {formatVolume(data.volume)} int
                 </div>
-                <div className="text-sm mt-1" style={{ color: COLORS.dark }}>
+                <div className="text-sm mt-1 text-gray-700">
                   {config.emoji} {config.sublabel}
                 </div>
-                <div className="text-xs mt-0.5" style={{ color: COLORS.medium }}>
+                <div className="text-xs mt-0.5 text-gray-500">
                   {data.count} colas
                 </div>
               </div>
@@ -1201,35 +1482,35 @@ function AgenticReadinessHeader({
           })}
         </div>
 
-        {/* Barra de distribución visual */}
+        {/* Barra de distribución visual - colores consistentes */}
         <div className="mb-4">
-          <div className="flex h-3 rounded-full overflow-hidden" style={{ backgroundColor: COLORS.light }}>
+          <div className="flex h-3 rounded-full overflow-hidden bg-gray-200">
             {tierPcts.AUTOMATE > 0 && (
               <div
-                style={{ width: `${tierPcts.AUTOMATE}%`, backgroundColor: COLORS.primary }}
+                style={{ width: `${tierPcts.AUTOMATE}%`, backgroundColor: '#10b981' }}
                 title={`AUTOMATE: ${Math.round(tierPcts.AUTOMATE)}%`}
               />
             )}
             {tierPcts.ASSIST > 0 && (
               <div
-                style={{ width: `${tierPcts.ASSIST}%`, backgroundColor: COLORS.dark }}
+                style={{ width: `${tierPcts.ASSIST}%`, backgroundColor: '#3b82f6' }}
                 title={`ASSIST: ${Math.round(tierPcts.ASSIST)}%`}
               />
             )}
             {tierPcts.AUGMENT > 0 && (
               <div
-                style={{ width: `${tierPcts.AUGMENT}%`, backgroundColor: COLORS.medium }}
+                style={{ width: `${tierPcts.AUGMENT}%`, backgroundColor: '#f59e0b' }}
                 title={`AUGMENT: ${Math.round(tierPcts.AUGMENT)}%`}
               />
             )}
             {tierPcts['HUMAN-ONLY'] > 0 && (
               <div
-                style={{ width: `${tierPcts['HUMAN-ONLY']}%`, backgroundColor: COLORS.light }}
+                style={{ width: `${tierPcts['HUMAN-ONLY']}%`, backgroundColor: '#6b7280' }}
                 title={`HUMAN: ${Math.round(tierPcts['HUMAN-ONLY'])}%`}
               />
             )}
           </div>
-          <div className="flex justify-between text-[10px] mt-1" style={{ color: COLORS.medium }}>
+          <div className="flex justify-between text-[10px] mt-1 text-gray-500">
             <span>0%</span>
             <span>50%</span>
             <span>100%</span>
@@ -1278,9 +1559,9 @@ function GlobalFactorsSection({
     ? allQueues.reduce((sum, q) => sum + q.cv_aht * q.volume, 0) / totalQueueVolume
     : 0;
 
-  // FCR promedio ponderado
+  // FCR Técnico promedio ponderado (consistente con Executive Summary)
   const avgFCR = totalQueueVolume > 0
-    ? allQueues.reduce((sum, q) => sum + q.fcr_rate * q.volume, 0) / totalQueueVolume
+    ? allQueues.reduce((sum, q) => sum + (q.fcr_tecnico ?? (100 - q.transfer_rate)) * q.volume, 0) / totalQueueVolume
     : 0;
 
   // Transfer rate promedio ponderado
@@ -1719,13 +2000,6 @@ function formatAHT(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Formatear moneda
-function formatCurrency(value: number): string {
-  if (value >= 1000000) return `€${(value / 1000000).toFixed(1)}M`;
-  if (value >= 1000) return `€${Math.round(value / 1000)}K`;
-  return `€${value.toLocaleString()}`;
-}
-
 // v3.4: Fila expandible por queue_skill (muestra original_queue_id al expandir con Tiers)
 function ExpandableSkillRow({
   dataPoint,
@@ -1859,7 +2133,7 @@ function ExpandableSkillRow({
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <span>FCR: {dataPoint.fcr_rate.toFixed(0)}%</span>
+                    <span>FCR: {(dataPoint.fcr_tecnico ?? (100 - dataPoint.transfer_rate)).toFixed(0)}%</span>
                     <span className="text-gray-300">|</span>
                     <span>Transfer: {dataPoint.transfer_rate.toFixed(0)}%</span>
                   </div>
@@ -1919,7 +2193,7 @@ function ExpandableSkillRow({
                               {queue.transfer_rate.toFixed(0)}%
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-gray-600 text-right">{queue.fcr_rate.toFixed(0)}%</td>
+                          <td className="px-3 py-2 text-gray-600 text-right">{(queue.fcr_tecnico ?? (100 - queue.transfer_rate)).toFixed(0)}%</td>
                           <td className="px-3 py-2 text-center">
                             {queue.scoreBreakdown ? (
                               <InfoTooltip content={<ScoreBreakdownTooltip breakdown={queue.scoreBreakdown} />}>
@@ -1962,7 +2236,7 @@ function ExpandableSkillRow({
                       <td className="px-3 py-2 text-right">{formatAHT(dataPoint.aht_mean)}</td>
                       <td className="px-3 py-2 text-right text-emerald-600">{dataPoint.cv_aht.toFixed(0)}%</td>
                       <td className="px-3 py-2 text-right">{dataPoint.transfer_rate.toFixed(0)}%</td>
-                      <td className="px-3 py-2 text-right">{dataPoint.fcr_rate.toFixed(0)}%</td>
+                      <td className="px-3 py-2 text-right">{(dataPoint.fcr_tecnico ?? (100 - dataPoint.transfer_rate)).toFixed(0)}%</td>
                       <td className="px-3 py-2 text-center">
                         <span className="px-1.5 py-0.5 rounded text-xs bg-gray-200 text-gray-700">
                           {dataPoint.agenticScore.toFixed(1)}
@@ -1982,6 +2256,523 @@ function ExpandableSkillRow({
         </motion.tr>
       )}
     </>
+  );
+}
+
+// ============================================
+// v4.0: NUEVAS SECCIONES POR TIER
+// ============================================
+
+// Configuración de colores y estilos por tier
+const TIER_SECTION_CONFIG: Record<AgenticTier, {
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  gradientFrom: string;
+  gradientTo: string;
+  icon: React.ElementType;
+  title: string;
+  subtitle: string;
+  emptyMessage: string;
+}> = {
+  'AUTOMATE': {
+    color: '#10b981',
+    bgColor: '#d1fae5',
+    borderColor: '#10b98140',
+    gradientFrom: 'from-emerald-50',
+    gradientTo: 'to-emerald-100/50',
+    icon: Sparkles,
+    title: 'Colas AUTOMATE',
+    subtitle: 'Listas para automatización completa con agente virtual (Score ≥7.5)',
+    emptyMessage: 'No hay colas clasificadas como AUTOMATE'
+  },
+  'ASSIST': {
+    color: '#3b82f6',
+    bgColor: '#dbeafe',
+    borderColor: '#3b82f640',
+    gradientFrom: 'from-blue-50',
+    gradientTo: 'to-blue-100/50',
+    icon: Bot,
+    title: 'Colas ASSIST',
+    subtitle: 'Candidatas a Copilot - IA asiste al agente humano (Score 5.5-7.5)',
+    emptyMessage: 'No hay colas clasificadas como ASSIST'
+  },
+  'AUGMENT': {
+    color: '#f59e0b',
+    bgColor: '#fef3c7',
+    borderColor: '#f59e0b40',
+    gradientFrom: 'from-amber-50',
+    gradientTo: 'to-amber-100/50',
+    icon: TrendingUp,
+    title: 'Colas AUGMENT',
+    subtitle: 'Requieren optimización previa: estandarizar procesos, reducir variabilidad (Score 3.5-5.5)',
+    emptyMessage: 'No hay colas clasificadas como AUGMENT'
+  },
+  'HUMAN-ONLY': {
+    color: '#6b7280',
+    bgColor: '#f3f4f6',
+    borderColor: '#6b728040',
+    gradientFrom: 'from-gray-50',
+    gradientTo: 'to-gray-100/50',
+    icon: Users,
+    title: 'Colas HUMAN-ONLY',
+    subtitle: 'No aptas para automatización: volumen insuficiente, datos de baja calidad o complejidad extrema',
+    emptyMessage: 'No hay colas clasificadas como HUMAN-ONLY'
+  }
+};
+
+// Componente de tabla de colas por Tier (AUTOMATE, ASSIST, AUGMENT)
+function TierQueueSection({
+  drilldownData,
+  tier
+}: {
+  drilldownData: DrilldownDataPoint[];
+  tier: 'AUTOMATE' | 'ASSIST' | 'AUGMENT';
+}) {
+  const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set());
+  const config = TIER_SECTION_CONFIG[tier];
+  const IconComponent = config.icon;
+
+  // Extraer todas las colas del tier específico, agrupadas por skill
+  const skillsWithTierQueues = drilldownData
+    .map(skill => ({
+      skill: skill.skill,
+      queues: skill.originalQueues.filter(q => q.tier === tier),
+      totalVolume: skill.originalQueues.filter(q => q.tier === tier).reduce((s, q) => s + q.volume, 0),
+      totalAnnualCost: skill.originalQueues.filter(q => q.tier === tier).reduce((s, q) => s + (q.annualCost || 0), 0)
+    }))
+    .filter(s => s.queues.length > 0)
+    .sort((a, b) => b.totalVolume - a.totalVolume);
+
+  const totalQueues = skillsWithTierQueues.reduce((sum, s) => sum + s.queues.length, 0);
+  const totalVolume = skillsWithTierQueues.reduce((sum, s) => sum + s.totalVolume, 0);
+  const totalCost = skillsWithTierQueues.reduce((sum, s) => sum + s.totalAnnualCost, 0);
+
+  // Calcular ahorro potencial según tier
+  const savingsRate = tier === 'AUTOMATE' ? 0.70 : tier === 'ASSIST' ? 0.30 : 0.15;
+  const potentialSavings = Math.round(totalCost * savingsRate);
+
+  const toggleSkill = (skill: string) => {
+    const newExpanded = new Set(expandedSkills);
+    if (newExpanded.has(skill)) {
+      newExpanded.delete(skill);
+    } else {
+      newExpanded.add(skill);
+    }
+    setExpandedSkills(newExpanded);
+  };
+
+  if (totalQueues === 0) {
+    return null;
+  }
+
+  return (
+    <div className="bg-white rounded-lg border-2 overflow-hidden shadow-sm" style={{ borderColor: config.borderColor }}>
+      {/* Header */}
+      <div className={`px-5 py-4 border-b bg-gradient-to-r ${config.gradientFrom} ${config.gradientTo}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: config.color }}>
+              <IconComponent className="w-5 h-5" />
+              {config.title}
+            </h3>
+            <p className="text-sm mt-1" style={{ color: config.color + 'cc' }}>
+              {config.subtitle}
+            </p>
+          </div>
+          <div className="text-right">
+            <span className="text-3xl font-bold" style={{ color: config.color }}>{totalQueues}</span>
+            <p className="text-sm" style={{ color: config.color + 'cc' }}>colas en {skillsWithTierQueues.length} skills</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Resumen */}
+      <div className="px-5 py-3 border-b flex items-center justify-between text-sm" style={{ backgroundColor: config.bgColor + '40' }}>
+        <div className="flex gap-4 flex-wrap">
+          <span className="text-gray-600">
+            Volumen: <strong className="text-gray-800">{totalVolume.toLocaleString()}</strong> int/mes
+          </span>
+          <span className="text-gray-600">
+            Coste: <strong className="text-gray-800">{formatCurrency(totalCost)}</strong>/año
+          </span>
+        </div>
+        <span className="font-bold" style={{ color: config.color }}>
+          Ahorro potencial: {formatCurrency(potentialSavings)}/año
+        </span>
+      </div>
+
+      {/* Tabla por Business Unit (skill) */}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="text-xs text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-200">
+              <th className="px-3 py-2.5 text-left font-medium w-8"></th>
+              <th className="px-3 py-2.5 text-left font-medium">Business Unit (Skill)</th>
+              <th className="px-3 py-2.5 text-center font-medium">Colas</th>
+              <th className="px-3 py-2.5 text-right font-medium">Volumen</th>
+              <th className="px-3 py-2.5 text-right font-medium">AHT Prom.</th>
+              <th className="px-3 py-2.5 text-right font-medium">CV Prom.</th>
+              <th className="px-3 py-2.5 text-right font-medium">FCR</th>
+              <th className="px-3 py-2.5 text-right font-medium">Ahorro Potencial</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {skillsWithTierQueues.map((skillData, idx) => {
+              const isExpanded = expandedSkills.has(skillData.skill);
+              const avgAHT = skillData.queues.reduce((s, q) => s + q.aht_mean * q.volume, 0) / skillData.totalVolume;
+              const avgCV = skillData.queues.reduce((s, q) => s + q.cv_aht * q.volume, 0) / skillData.totalVolume;
+              const avgFCR = skillData.queues.reduce((s, q) => s + (q.fcr_tecnico ?? (100 - q.transfer_rate)) * q.volume, 0) / skillData.totalVolume;
+              const skillSavings = Math.round(skillData.totalAnnualCost * savingsRate);
+
+              return (
+                <React.Fragment key={skillData.skill}>
+                  {/* Fila del Skill */}
+                  <tr
+                    className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => toggleSkill(skillData.skill)}
+                  >
+                    <td className="px-3 py-3 text-center">
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-gray-400" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="font-medium text-gray-800">{skillData.skill}</span>
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: config.bgColor, color: config.color }}>
+                        {skillData.queues.length}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right font-medium text-gray-700">
+                      {skillData.totalVolume.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-3 text-right text-gray-600">
+                      {formatAHT(avgAHT)}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={avgCV < 75 ? 'text-emerald-600' : avgCV < 100 ? 'text-amber-600' : 'text-red-600'}>
+                        {avgCV.toFixed(0)}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right text-gray-600">
+                      {avgFCR.toFixed(0)}%
+                    </td>
+                    <td className="px-3 py-3 text-right font-medium" style={{ color: config.color }}>
+                      {formatCurrency(skillSavings)}
+                    </td>
+                  </tr>
+
+                  {/* Detalle expandible: colas individuales */}
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={8} className="px-0 py-0">
+                        <div className="mx-4 my-2 rounded-lg border overflow-hidden" style={{ borderColor: config.borderColor, backgroundColor: config.bgColor + '20' }}>
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-xs text-gray-500 uppercase tracking-wider" style={{ backgroundColor: config.bgColor + '60' }}>
+                                <th className="px-4 py-2 text-left font-medium">Cola (ID)</th>
+                                <th className="px-3 py-2 text-right font-medium">Volumen</th>
+                                <th className="px-3 py-2 text-right font-medium">AHT</th>
+                                <th className="px-3 py-2 text-right font-medium">CV</th>
+                                <th className="px-3 py-2 text-right font-medium">Transfer</th>
+                                <th className="px-3 py-2 text-right font-medium">FCR</th>
+                                <th className="px-3 py-2 text-center font-medium">Score</th>
+                                <th className="px-3 py-2 text-right font-medium">Ahorro</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {skillData.queues.map((queue, qIdx) => {
+                                const queueSavings = Math.round((queue.annualCost || 0) * savingsRate);
+                                return (
+                                  <tr key={queue.original_queue_id} className="hover:bg-white/50">
+                                    <td className="px-4 py-2 font-medium text-gray-700 truncate max-w-[200px]" title={queue.original_queue_id}>
+                                      {queue.original_queue_id}
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-gray-600">{queue.volume.toLocaleString()}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600">{formatAHT(queue.aht_mean)}</td>
+                                    <td className="px-3 py-2 text-right">
+                                      <span className={queue.cv_aht < 75 ? 'text-emerald-600' : queue.cv_aht < 100 ? 'text-amber-600' : 'text-red-600'}>
+                                        {queue.cv_aht.toFixed(0)}%
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-gray-600">{queue.transfer_rate.toFixed(0)}%</td>
+                                    <td className="px-3 py-2 text-right text-gray-600">{(queue.fcr_tecnico ?? (100 - queue.transfer_rate)).toFixed(0)}%</td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: config.bgColor, color: config.color }}>
+                                        {queue.agenticScore.toFixed(1)}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-medium" style={{ color: config.color }}>
+                                      {formatCurrency(queueSavings)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Footer */}
+      <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500">
+        Click en un skill para ver el detalle de colas individuales
+      </div>
+    </div>
+  );
+}
+
+// Componente para colas HUMAN-ONLY agrupadas por razón/red flag
+function HumanOnlyByReasonSection({ drilldownData }: { drilldownData: DrilldownDataPoint[] }) {
+  const [expandedReasons, setExpandedReasons] = useState<Set<string>>(new Set());
+  const config = TIER_SECTION_CONFIG['HUMAN-ONLY'];
+
+  // Extraer todas las colas HUMAN-ONLY
+  const allHumanOnlyQueues = drilldownData.flatMap(skill =>
+    skill.originalQueues
+      .filter(q => q.tier === 'HUMAN-ONLY')
+      .map(q => ({ ...q, skillName: skill.skill }))
+  );
+
+  if (allHumanOnlyQueues.length === 0) {
+    return null;
+  }
+
+  // Agrupar por razón principal (red flag dominante o "Sin red flags")
+  const queuesByReason: Record<string, typeof allHumanOnlyQueues> = {};
+
+  allHumanOnlyQueues.forEach(queue => {
+    const flags = detectRedFlags(queue);
+    // Determinar razón principal (prioridad: cv_high > transfer_high > volume_low > valid_low)
+    let reason = 'Sin Red Flags específicos';
+    let reasonId = 'no_flags';
+
+    if (flags.length > 0) {
+      // Ordenar por severidad implícita
+      const priorityOrder = ['cv_high', 'transfer_high', 'volume_low', 'valid_low'];
+      const sortedFlags = [...flags].sort((a, b) =>
+        priorityOrder.indexOf(a.config.id) - priorityOrder.indexOf(b.config.id)
+      );
+      reasonId = sortedFlags[0].config.id;
+      reason = sortedFlags[0].config.label;
+    }
+
+    if (!queuesByReason[reasonId]) {
+      queuesByReason[reasonId] = [];
+    }
+    queuesByReason[reasonId].push(queue);
+  });
+
+  // Convertir a array y ordenar por volumen
+  const reasonGroups = Object.entries(queuesByReason)
+    .map(([reasonId, queues]) => {
+      const flagConfig = RED_FLAG_CONFIGS.find(c => c.id === reasonId);
+      return {
+        reasonId,
+        reason: flagConfig?.label || 'Sin Red Flags específicos',
+        description: flagConfig?.description || 'Colas que no cumplen criterios de automatización',
+        action: flagConfig ? getActionForFlag(flagConfig.id) : 'Revisar manualmente',
+        queues,
+        totalVolume: queues.reduce((s, q) => s + q.volume, 0),
+        queueCount: queues.length
+      };
+    })
+    .sort((a, b) => b.totalVolume - a.totalVolume);
+
+  const totalQueues = allHumanOnlyQueues.length;
+  const totalVolume = allHumanOnlyQueues.reduce((s, q) => s + q.volume, 0);
+
+  const toggleReason = (reasonId: string) => {
+    const newExpanded = new Set(expandedReasons);
+    if (newExpanded.has(reasonId)) {
+      newExpanded.delete(reasonId);
+    } else {
+      newExpanded.add(reasonId);
+    }
+    setExpandedReasons(newExpanded);
+  };
+
+  function getActionForFlag(flagId: string): string {
+    switch (flagId) {
+      case 'cv_high': return 'Estandarizar procesos y scripts';
+      case 'transfer_high': return 'Simplificar flujo, capacitar agentes';
+      case 'volume_low': return 'Consolidar con colas similares';
+      case 'valid_low': return 'Mejorar captura de datos';
+      default: return 'Revisar manualmente';
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-lg border-2 overflow-hidden shadow-sm" style={{ borderColor: config.borderColor }}>
+      {/* Header */}
+      <div className={`px-5 py-4 border-b bg-gradient-to-r ${config.gradientFrom} ${config.gradientTo}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: config.color }}>
+              <Users className="w-5 h-5" />
+              {config.title}
+            </h3>
+            <p className="text-sm mt-1 text-gray-600">
+              {config.subtitle}
+            </p>
+          </div>
+          <div className="text-right">
+            <span className="text-3xl font-bold" style={{ color: config.color }}>{totalQueues}</span>
+            <p className="text-sm text-gray-500">colas agrupadas por {reasonGroups.length} razones</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Resumen */}
+      <div className="px-5 py-3 border-b bg-gray-50 flex items-center justify-between text-sm">
+        <span className="text-gray-600">
+          Volumen total: <strong className="text-gray-800">{totalVolume.toLocaleString()}</strong> int/mes
+        </span>
+        <span className="text-gray-500">
+          Estas colas requieren intervención antes de considerar automatización
+        </span>
+      </div>
+
+      {/* Tabla agrupada por razón */}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="text-xs text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-200">
+              <th className="px-3 py-2.5 text-left font-medium w-8"></th>
+              <th className="px-3 py-2.5 text-left font-medium">Razón / Red Flag</th>
+              <th className="px-3 py-2.5 text-center font-medium">Colas</th>
+              <th className="px-3 py-2.5 text-right font-medium">Volumen</th>
+              <th className="px-3 py-2.5 text-left font-medium">Acción Recomendada</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {reasonGroups.map((group) => {
+              const isExpanded = expandedReasons.has(group.reasonId);
+
+              return (
+                <React.Fragment key={group.reasonId}>
+                  {/* Fila de la razón */}
+                  <tr
+                    className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => toggleReason(group.reasonId)}
+                  >
+                    <td className="px-3 py-3 text-center">
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-gray-400" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-500" />
+                        <div>
+                          <span className="font-medium text-gray-800">{group.reason}</span>
+                          <p className="text-xs text-gray-500">{group.description}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                        {group.queueCount}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right font-medium text-gray-700">
+                      {group.totalVolume.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="text-xs px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                        {group.action}
+                      </span>
+                    </td>
+                  </tr>
+
+                  {/* Detalle expandible: colas de esta razón */}
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={5} className="px-0 py-0">
+                        <div className="mx-4 my-2 rounded-lg border border-gray-200 overflow-hidden bg-gray-50/50">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-xs text-gray-500 uppercase tracking-wider bg-gray-100">
+                                <th className="px-4 py-2 text-left font-medium">Cola (ID)</th>
+                                <th className="px-3 py-2 text-left font-medium">Skill</th>
+                                <th className="px-3 py-2 text-right font-medium">Volumen</th>
+                                <th className="px-3 py-2 text-right font-medium">CV AHT</th>
+                                <th className="px-3 py-2 text-right font-medium">Transfer</th>
+                                <th className="px-3 py-2 text-center font-medium">Score</th>
+                                <th className="px-3 py-2 text-left font-medium">Red Flags</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 bg-white">
+                              {group.queues.slice(0, 20).map((queue) => {
+                                const flags = detectRedFlags(queue);
+                                return (
+                                  <tr key={queue.original_queue_id} className="hover:bg-gray-50">
+                                    <td className="px-4 py-2 font-medium text-gray-700 truncate max-w-[180px]" title={queue.original_queue_id}>
+                                      {queue.original_queue_id}
+                                    </td>
+                                    <td className="px-3 py-2 text-gray-600 text-xs">{queue.skillName}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600">{queue.volume.toLocaleString()}</td>
+                                    <td className="px-3 py-2 text-right">
+                                      <span className={queue.cv_aht > 120 ? 'text-red-600 font-medium' : 'text-gray-600'}>
+                                        {queue.cv_aht.toFixed(0)}%
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                      <span className={queue.transfer_rate > 50 ? 'text-red-600 font-medium' : 'text-gray-600'}>
+                                        {queue.transfer_rate.toFixed(0)}%
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                        {queue.agenticScore.toFixed(1)}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      <div className="flex flex-wrap gap-1">
+                                        {flags.map(flag => (
+                                          <RedFlagBadge key={flag.config.id} flag={flag} size="sm" />
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                          {group.queues.length > 20 && (
+                            <div className="px-4 py-2 text-xs text-gray-500 bg-gray-100 text-center">
+                              Mostrando 20 de {group.queues.length} colas
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Footer */}
+      <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500">
+        Click en una razón para ver las colas afectadas. Priorizar acciones según volumen impactado.
+      </div>
+    </div>
   );
 }
 
@@ -2169,10 +2960,11 @@ function HumanOnlyRedFlagsSection({ drilldownData }: { drilldownData: DrilldownD
   const totalVolumeRedFlags = queuesWithFlags.reduce((sum, qf) => sum + qf.queue.volume, 0);
   const pctVolumeRedFlags = totalVolumeAllQueues > 0 ? (totalVolumeRedFlags / totalVolumeAllQueues) * 100 : 0;
 
-  // v3.11: Coste usando modelo CPI (consistente con Roadmap y Executive Summary)
+  // v4.2: Coste usando modelo CPI (consistente con Roadmap y Executive Summary)
+  // IMPORTANTE: El volumen es de 11 meses, se convierte a anual: (Vol/11) × 12
   const CPI_HUMANO_RF = 2.33;  // €/interacción (coste unitario humano)
-  const costeAnualRedFlags = Math.round(totalVolumeRedFlags * 12 * CPI_HUMANO_RF);
-  const costeAnualTotal = Math.round(totalVolumeAllQueues * 12 * CPI_HUMANO_RF);
+  const costeAnualRedFlags = Math.round((totalVolumeRedFlags / DATA_PERIOD_MONTHS) * 12 * CPI_HUMANO_RF);
+  const costeAnualTotal = Math.round((totalVolumeAllQueues / DATA_PERIOD_MONTHS) * 12 * CPI_HUMANO_RF);
   const pctCosteRedFlags = costeAnualTotal > 0 ? (costeAnualRedFlags / costeAnualTotal) * 100 : 0;
 
   // Estadísticas detalladas por tipo de red flag
@@ -2634,7 +3426,7 @@ function SkillsToOptimizeSection({ drilldownData }: { drilldownData: DrilldownDa
                   <td className="px-3 py-2 text-gray-600 text-right">{formatAHT(item.aht_mean)}</td>
                   <MetricCell value={item.cv_aht} metric="cv_aht" />
                   <MetricCell value={item.transfer_rate} metric="transfer" />
-                  <MetricCell value={item.fcr_rate} metric="fcr" />
+                  <MetricCell value={item.fcr_tecnico ?? (100 - item.transfer_rate)} metric="fcr" />
                   <td className="px-3 py-2 text-center">
                     <TierBadge tier={dominantTier} />
                   </td>
@@ -2691,8 +3483,9 @@ function RoadmapConnectionSection({ drilldownData }: { drilldownData: DrilldownD
     q.tier === 'HUMAN-ONLY' && q.transfer_rate > 50
   );
 
-  // v3.10: Cálculo de ahorros alineado con modelo TCO del Roadmap
-  // Fórmula: Vol × 12 × Rate × (CPI_humano - CPI_target)
+  // v4.2: Cálculo de ahorros alineado con modelo TCO del Roadmap
+  // Fórmula: (Vol/11) × 12 × Rate × (CPI_humano - CPI_target)
+  // IMPORTANTE: El volumen es de 11 meses, se convierte a anual
   const CPI_HUMANO = 2.33;
   const CPI_BOT = 0.15;
   const CPI_ASSIST_TARGET = 1.50;
@@ -2700,11 +3493,11 @@ function RoadmapConnectionSection({ drilldownData }: { drilldownData: DrilldownD
   const RATE_ASSIST = 0.30;    // 30% deflection
 
   // Quick Wins (AUTOMATE): 70% de interacciones pueden ser atendidas por bot
-  const annualSavingsAutomate = Math.round(automateVolume * 12 * RATE_AUTOMATE * (CPI_HUMANO - CPI_BOT));
+  const annualSavingsAutomate = Math.round((automateVolume / DATA_PERIOD_MONTHS) * 12 * RATE_AUTOMATE * (CPI_HUMANO - CPI_BOT));
   const monthlySavingsAutomate = Math.round(annualSavingsAutomate / 12);
 
   // Potential savings from ASSIST (si implementan Copilot): 30% deflection
-  const potentialAnnualAssist = Math.round(assistVolume * 12 * RATE_ASSIST * (CPI_HUMANO - CPI_ASSIST_TARGET));
+  const potentialAnnualAssist = Math.round((assistVolume / DATA_PERIOD_MONTHS) * 12 * RATE_ASSIST * (CPI_HUMANO - CPI_ASSIST_TARGET));
 
   // Get top skills with AUTOMATE queues
   const skillsWithAutomate = drilldownData
@@ -2876,34 +3669,34 @@ export function AgenticReadinessTab({ data, onTabChange }: AgenticReadinessTabPr
 
   return (
     <div className="space-y-6">
-      {/* Cabecera Agentic Readiness Score - Rediseñada */}
+      {/* SECCIÓN 0: Introducción Metodológica (colapsable) */}
+      <AgenticMethodologyIntro
+        tierData={tierData}
+        totalVolume={totalVolume}
+        totalQueues={totalQueues}
+      />
+
+      {/* SECCIÓN 1: Cabecera Agentic Readiness Score - Visión Global */}
       <AgenticReadinessHeader
         tierData={tierData}
         totalVolume={totalVolume}
         totalQueues={totalQueues}
       />
 
-      {/* Factores del Score Global */}
-      {data.drilldownData && data.drilldownData.length > 0 && (
-        <GlobalFactorsSection
-          drilldownData={data.drilldownData}
-          tierData={tierData}
-          totalVolume={totalVolume}
-        />
-      )}
-
-      {/* v3.10: Mapa de Oportunidades de Automatización (Bubble Chart) */}
-      {data.drilldownData && data.drilldownData.length > 0 && (
-        <OpportunityBubbleChart drilldownData={data.drilldownData} />
-      )}
-
-      {/* v3.1: Primero lo positivo - Candidatos Prioritarios (panel principal expandible) */}
+      {/* SECCIÓN 2-5: Desglose por Colas en 4 Tablas por Tier */}
       {data.drilldownData && data.drilldownData.length > 0 ? (
         <>
-          <PriorityCandidatesSection drilldownData={data.drilldownData} />
-          <SkillsToOptimizeSection drilldownData={data.drilldownData} />
-          {/* v3.5: Red Flags para colas HUMAN-ONLY */}
-          <HumanOnlyRedFlagsSection drilldownData={data.drilldownData} />
+          {/* TABLA 1: Colas AUTOMATE - Listas para automatización */}
+          <TierQueueSection drilldownData={data.drilldownData} tier="AUTOMATE" />
+
+          {/* TABLA 2: Colas ASSIST - Candidatas a Copilot */}
+          <TierQueueSection drilldownData={data.drilldownData} tier="ASSIST" />
+
+          {/* TABLA 3: Colas AUGMENT - Requieren optimización */}
+          <TierQueueSection drilldownData={data.drilldownData} tier="AUGMENT" />
+
+          {/* TABLA 4: Colas HUMAN-ONLY - Agrupadas por razón/red flag */}
+          <HumanOnlyByReasonSection drilldownData={data.drilldownData} />
         </>
       ) : (
         /* Fallback a tabla por Línea de Negocio si no hay drilldown data */

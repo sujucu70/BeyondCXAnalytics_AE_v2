@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -87,14 +87,26 @@ class OperationalPerformanceMetrics:
         )
 
         # v3.0: Filtrar NOISE y ZOMBIE para cálculos de variabilidad
-        # record_status: 'valid', 'noise', 'zombie', 'abandon'
-        # Para AHT/CV solo usamos 'valid' (o sin status = legacy data)
+        # record_status: 'VALID', 'NOISE', 'ZOMBIE', 'ABANDON'
+        # Para AHT/CV solo usamos 'VALID' (excluye noise, zombie, abandon)
         if "record_status" in df.columns:
             df["record_status"] = df["record_status"].astype(str).str.strip().str.upper()
-            # Crear máscara para registros válidos (para cálculos de CV/variabilidad)
-            df["_is_valid_for_cv"] = df["record_status"].isin(["VALID", "NAN", ""])  | df["record_status"].isna()
+            # Crear máscara para registros válidos: SOLO "VALID"
+            # Excluye explícitamente NOISE, ZOMBIE, ABANDON y cualquier otro valor
+            df["_is_valid_for_cv"] = df["record_status"] == "VALID"
+
+            # Log record_status breakdown for debugging
+            status_counts = df["record_status"].value_counts()
+            valid_count = int(df["_is_valid_for_cv"].sum())
+            print(f"[OperationalPerformance] Record status breakdown:")
+            print(f"   Total rows: {len(df)}")
+            for status, count in status_counts.items():
+                print(f"   - {status}: {count}")
+            print(f"   VALID rows for AHT calculation: {valid_count}")
         else:
+            # Legacy data sin record_status: incluir todo
             df["_is_valid_for_cv"] = True
+            print(f"[OperationalPerformance] No record_status column - using all {len(df)} rows")
 
         # Normalización básica
         df["queue_skill"] = df["queue_skill"].astype(str).str.strip()
@@ -156,6 +168,9 @@ class OperationalPerformanceMetrics:
     def talk_hold_acw_p50_by_skill(self) -> pd.DataFrame:
         """
         P50 de talk_time, hold_time y wrap_up_time por skill.
+
+        Incluye queue_skill como columna (no solo índice) para que
+        el frontend pueda hacer lookup por nombre de skill.
         """
         df = self.df
 
@@ -173,7 +188,8 @@ class OperationalPerformanceMetrics:
                 "acw_p50": grouped["wrap_up_time"].apply(lambda s: perc(s, 50)),
             }
         )
-        return result.round(2).sort_index()
+        # Reset index to include queue_skill as column for frontend lookup
+        return result.round(2).sort_index().reset_index()
 
     # ------------------------------------------------------------------ #
     # FCR, escalación, abandono, reincidencia, repetición canal
@@ -290,13 +306,17 @@ class OperationalPerformanceMetrics:
 
     def recurrence_rate_7d(self) -> float:
         """
-        % de clientes que vuelven a contactar en < 7 días.
+        % de clientes que vuelven a contactar en < 7 días para el MISMO skill.
 
-        Se basa en customer_id (o caller_id si no hay customer_id).
+        Se basa en customer_id (o caller_id si no hay customer_id) + queue_skill.
         Calcula:
-        - Para cada cliente, ordena por datetime_start
-        - Si hay dos contactos consecutivos separados < 7 días, cuenta como "recurrente"
+        - Para cada combinación cliente + skill, ordena por datetime_start
+        - Si hay dos contactos consecutivos separados < 7 días (mismo cliente, mismo skill),
+          cuenta como "recurrente"
         - Tasa = nº clientes recurrentes / nº total de clientes
+
+        NOTA: Solo cuenta como recurrencia si el cliente llama por el MISMO skill.
+        Un cliente que llama a "Ventas" y luego a "Soporte" NO es recurrente.
         """
 
         df = self.df.dropna(subset=["datetime_start"]).copy()
@@ -313,16 +333,17 @@ class OperationalPerformanceMetrics:
         if df.empty:
             return float("nan")
 
-        # Ordenar por cliente + fecha
-        df = df.sort_values(["customer_id", "datetime_start"])
+        # Ordenar por cliente + skill + fecha
+        df = df.sort_values(["customer_id", "queue_skill", "datetime_start"])
 
-        # Diferencia de tiempo entre contactos consecutivos por cliente
-        df["delta"] = df.groupby("customer_id")["datetime_start"].diff()
+        # Diferencia de tiempo entre contactos consecutivos por cliente Y skill
+        # Esto asegura que solo contamos recontactos del mismo cliente para el mismo skill
+        df["delta"] = df.groupby(["customer_id", "queue_skill"])["datetime_start"].diff()
 
-        # Marcamos los contactos que ocurren a menos de 7 días del anterior
+        # Marcamos los contactos que ocurren a menos de 7 días del anterior (mismo skill)
         recurrence_mask = df["delta"] < pd.Timedelta(days=7)
 
-        # Nº de clientes que tienen al menos un contacto recurrente
+        # Nº de clientes que tienen al menos un contacto recurrente (para cualquier skill)
         recurrent_customers = df.loc[recurrence_mask, "customer_id"].nunique()
         total_customers = df["customer_id"].nunique()
 
@@ -568,3 +589,128 @@ class OperationalPerformanceMetrics:
         ax.grid(axis="y", alpha=0.3)
 
         return ax
+
+    # ------------------------------------------------------------------ #
+    # Métricas por skill (para consistencia frontend cached/fresh)
+    # ------------------------------------------------------------------ #
+    def metrics_by_skill(self) -> List[Dict[str, Any]]:
+        """
+        Calcula métricas operacionales por skill:
+        - transfer_rate: % de interacciones con transfer_flag == True
+        - abandonment_rate: % de interacciones abandonadas
+        - fcr_tecnico: 100 - transfer_rate (sin transferencia)
+        - fcr_real: % sin transferencia Y sin recontacto 7d (si hay datos)
+        - volume: número de interacciones
+
+        Devuelve una lista de dicts, uno por skill, para que el frontend
+        tenga acceso a las métricas reales por skill (no estimadas).
+        """
+        df = self.df
+        if df.empty:
+            return []
+
+        results = []
+
+        # Detectar columna de abandono
+        abandon_col = None
+        for col_name in ["is_abandoned", "abandoned_flag", "abandoned"]:
+            if col_name in df.columns:
+                abandon_col = col_name
+                break
+
+        # Detectar columna de repeat_call_7d para FCR real
+        repeat_col = None
+        for col_name in ["repeat_call_7d", "repeat_7d", "is_repeat_7d"]:
+            if col_name in df.columns:
+                repeat_col = col_name
+                break
+
+        for skill, group in df.groupby("queue_skill"):
+            total = len(group)
+            if total == 0:
+                continue
+
+            # Transfer rate
+            if "transfer_flag" in group.columns:
+                transfer_count = group["transfer_flag"].sum()
+                transfer_rate = float(round(transfer_count / total * 100, 2))
+            else:
+                transfer_rate = 0.0
+
+            # FCR Técnico = 100 - transfer_rate
+            fcr_tecnico = float(round(100.0 - transfer_rate, 2))
+
+            # Abandonment rate
+            abandonment_rate = 0.0
+            if abandon_col:
+                col = group[abandon_col]
+                if col.dtype == "O":
+                    abandon_mask = (
+                        col.astype(str)
+                           .str.strip()
+                           .str.lower()
+                           .isin(["true", "t", "1", "yes", "y", "si", "sí"])
+                    )
+                else:
+                    abandon_mask = pd.to_numeric(col, errors="coerce").fillna(0) > 0
+                abandoned = int(abandon_mask.sum())
+                abandonment_rate = float(round(abandoned / total * 100, 2))
+
+            # FCR Real (sin transferencia Y sin recontacto 7d)
+            fcr_real = fcr_tecnico  # default to fcr_tecnico if no repeat data
+            if repeat_col and "transfer_flag" in group.columns:
+                repeat_data = group[repeat_col]
+                if repeat_data.dtype == "O":
+                    repeat_mask = (
+                        repeat_data.astype(str)
+                           .str.strip()
+                           .str.lower()
+                           .isin(["true", "t", "1", "yes", "y", "si", "sí"])
+                    )
+                else:
+                    repeat_mask = pd.to_numeric(repeat_data, errors="coerce").fillna(0) > 0
+
+                # FCR Real: no transfer AND no repeat
+                fcr_real_mask = (~group["transfer_flag"]) & (~repeat_mask)
+                fcr_real_count = fcr_real_mask.sum()
+                fcr_real = float(round(fcr_real_count / total * 100, 2))
+
+            # AHT Mean (promedio de handle_time sobre registros válidos)
+            # Filtramos solo registros 'valid' (excluye noise/zombie) para consistencia
+            if "_is_valid_for_cv" in group.columns:
+                valid_records = group[group["_is_valid_for_cv"]]
+            else:
+                valid_records = group
+
+            if len(valid_records) > 0 and "handle_time" in valid_records.columns:
+                aht_mean = float(round(valid_records["handle_time"].mean(), 2))
+            else:
+                aht_mean = 0.0
+
+            # AHT Total (promedio de handle_time sobre TODOS los registros)
+            # Incluye NOISE, ZOMBIE, ABANDON - solo para información/comparación
+            if len(group) > 0 and "handle_time" in group.columns:
+                aht_total = float(round(group["handle_time"].mean(), 2))
+            else:
+                aht_total = 0.0
+
+            # Hold Time Mean (promedio de hold_time sobre registros válidos)
+            # Consistente con fresh path que usa MEAN, no P50
+            if len(valid_records) > 0 and "hold_time" in valid_records.columns:
+                hold_time_mean = float(round(valid_records["hold_time"].mean(), 2))
+            else:
+                hold_time_mean = 0.0
+
+            results.append({
+                "skill": str(skill),
+                "volume": int(total),
+                "transfer_rate": transfer_rate,
+                "abandonment_rate": abandonment_rate,
+                "fcr_tecnico": fcr_tecnico,
+                "fcr_real": fcr_real,
+                "aht_mean": aht_mean,
+                "aht_total": aht_total,
+                "hold_time_mean": hold_time_mean,
+            })
+
+        return results

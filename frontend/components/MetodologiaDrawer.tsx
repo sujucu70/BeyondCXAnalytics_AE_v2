@@ -304,6 +304,111 @@ function KPIRedefinitionSection({ kpis }: { kpis: DataSummary['kpis'] }) {
   );
 }
 
+function CPICalculationSection({ totalCost, totalVolume, costPerHour = 20 }: { totalCost: number; totalVolume: number; costPerHour?: number }) {
+  // Productivity factor: agents are ~70% productive (rest is breaks, training, after-call work, etc.)
+  const effectiveProductivity = 0.70;
+
+  // CPI = Total Cost / Total Volume
+  // El coste total ya incluye: TODOS los registros (noise + zombie + valid) y el factor de productividad
+  const cpi = totalVolume > 0 ? totalCost / totalVolume : 0;
+
+  return (
+    <div>
+      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <BarChart3 className="w-5 h-5 text-emerald-600" />
+        Coste por Interacción (CPI)
+      </h3>
+
+      <p className="text-sm text-gray-600 mb-4">
+        El CPI se calcula dividiendo el <strong>coste total</strong> entre el <strong>volumen de interacciones</strong>.
+        El coste total incluye <em>todas</em> las interacciones (noise, zombie y válidas) porque todas se facturan,
+        y aplica un factor de productividad del {(effectiveProductivity * 100).toFixed(0)}%.
+      </p>
+
+      {/* Fórmula visual */}
+      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-4">
+        <div className="text-center mb-3">
+          <span className="text-xs text-emerald-700 uppercase tracking-wider font-medium">Fórmula de Cálculo</span>
+        </div>
+        <div className="flex items-center justify-center gap-2 text-lg font-mono flex-wrap">
+          <span className="px-3 py-1 bg-white rounded border border-emerald-300">CPI</span>
+          <span className="text-emerald-600">=</span>
+          <span className="px-2 py-1 bg-blue-100 rounded text-blue-800 text-sm">Coste Total</span>
+          <span className="text-emerald-600">÷</span>
+          <span className="px-2 py-1 bg-amber-100 rounded text-amber-800 text-sm">Volumen Total</span>
+        </div>
+        <p className="text-[10px] text-center text-emerald-600 mt-2">
+          El coste total usa (AHT segundos ÷ 3600) × coste/hora × volumen ÷ productividad
+        </p>
+      </div>
+
+      {/* Cómo se calcula el coste total */}
+      <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4">
+        <div className="text-sm font-semibold text-slate-700 mb-2">¿Cómo se calcula el Coste Total?</div>
+        <div className="bg-white rounded p-3 mb-3">
+          <div className="flex items-center justify-center gap-2 text-sm font-mono flex-wrap">
+            <span className="text-slate-600">Coste =</span>
+            <span className="px-2 py-1 bg-blue-100 rounded text-blue-800 text-xs">(AHT seg ÷ 3600)</span>
+            <span className="text-slate-400">×</span>
+            <span className="px-2 py-1 bg-amber-100 rounded text-amber-800 text-xs">€{costPerHour}/h</span>
+            <span className="text-slate-400">×</span>
+            <span className="px-2 py-1 bg-gray-100 rounded text-gray-800 text-xs">Volumen</span>
+            <span className="text-slate-400">÷</span>
+            <span className="px-2 py-1 bg-purple-100 rounded text-purple-800 text-xs">{(effectiveProductivity * 100).toFixed(0)}%</span>
+          </div>
+        </div>
+        <p className="text-xs text-slate-600">
+          El <strong>AHT</strong> está en segundos, se convierte a horas dividiendo por 3600.
+          Incluye todas las interacciones que generan coste (noise + zombie + válidas).
+          Solo se excluyen los abandonos porque no consumen tiempo de agente.
+        </p>
+      </div>
+
+      {/* Componentes del coste horario */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-semibold text-amber-800">Coste por Hora del Agente (Fully Loaded)</div>
+          <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">
+            Valor introducido: €{costPerHour.toFixed(2)}/h
+          </span>
+        </div>
+        <p className="text-xs text-amber-700 mb-3">
+          Este valor fue configurado en la pantalla de entrada de datos y debe incluir todos los costes asociados al agente:
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-500">•</span>
+            <span className="text-amber-700">Salario bruto del agente</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-amber-500">•</span>
+            <span className="text-amber-700">Costes de seguridad social</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-amber-500">•</span>
+            <span className="text-amber-700">Licencias de software</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-amber-500">•</span>
+            <span className="text-amber-700">Infraestructura y puesto</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-amber-500">•</span>
+            <span className="text-amber-700">Supervisión y QA</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-amber-500">•</span>
+            <span className="text-amber-700">Formación y overhead</span>
+          </div>
+        </div>
+        <p className="text-[10px] text-amber-600 mt-3 italic">
+          💡 Si necesita ajustar este valor, puede volver a la pantalla de entrada de datos y modificarlo.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function BeforeAfterSection({ kpis }: { kpis: DataSummary['kpis'] }) {
   const rows = [
     {
@@ -528,6 +633,9 @@ function GuaranteesSection() {
 export function MetodologiaDrawer({ isOpen, onClose, data }: MetodologiaDrawerProps) {
   // Calcular datos del resumen desde AnalysisData
   const totalRegistros = data.heatmapData?.reduce((sum, h) => sum + h.volume, 0) || 0;
+  const totalCost = data.heatmapData?.reduce((sum, h) => sum + (h.annual_cost || 0), 0) || 0;
+  // cost_volume: volumen usado para calcular coste (non-abandon), fallback a volume si no existe
+  const totalCostVolume = data.heatmapData?.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0) || totalRegistros;
 
   // Calcular meses de histórico desde dateRange
   let mesesHistorico = 1;
@@ -633,6 +741,11 @@ export function MetodologiaDrawer({ isOpen, onClose, data }: MetodologiaDrawerPr
               <SkillsMappingSection numSkillsNegocio={dataSummary.kpis.skillsNegocio} />
               <TaxonomySection data={dataSummary.taxonomia} />
               <KPIRedefinitionSection kpis={dataSummary.kpis} />
+              <CPICalculationSection
+                totalCost={totalCost}
+                totalVolume={totalCostVolume}
+                costPerHour={data.staticConfig?.cost_per_hour || 20}
+              />
               <BeforeAfterSection kpis={dataSummary.kpis} />
               <GuaranteesSection />
             </div>

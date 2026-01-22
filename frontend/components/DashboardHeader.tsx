@@ -1,8 +1,7 @@
 import { motion } from 'framer-motion';
-import { LayoutDashboard, Layers, Bot, Map } from 'lucide-react';
-import { formatDateMonthYear } from '../utils/formatters';
+import { LayoutDashboard, Layers, Bot, Map, ShieldCheck, Info, Scale } from 'lucide-react';
 
-export type TabId = 'executive' | 'dimensions' | 'readiness' | 'roadmap';
+export type TabId = 'executive' | 'dimensions' | 'readiness' | 'roadmap' | 'law10';
 
 export interface TabConfig {
   id: TabId;
@@ -14,6 +13,7 @@ interface DashboardHeaderProps {
   title?: string;
   activeTab: TabId;
   onTabChange: (id: TabId) => void;
+  onMetodologiaClick?: () => void;
 }
 
 const TABS: TabConfig[] = [
@@ -21,20 +21,32 @@ const TABS: TabConfig[] = [
   { id: 'dimensions', label: 'Dimensiones', icon: Layers },
   { id: 'readiness', label: 'Agentic Readiness', icon: Bot },
   { id: 'roadmap', label: 'Roadmap', icon: Map },
+  { id: 'law10', label: 'Ley 10/2025', icon: Scale },
 ];
 
 export function DashboardHeader({
   title = 'AIR EUROPA - Beyond CX Analytics',
   activeTab,
-  onTabChange
+  onTabChange,
+  onMetodologiaClick
 }: DashboardHeaderProps) {
   return (
     <header className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
-      {/* Top row: Title and Date */}
+      {/* Top row: Title and Metodología Badge */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-base sm:text-xl font-bold text-slate-800 truncate">{title}</h1>
-          <span className="text-xs sm:text-sm text-slate-500 flex-shrink-0">{formatDateMonthYear()}</span>
+          {onMetodologiaClick && (
+            <button
+              onClick={onMetodologiaClick}
+              className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 bg-green-100 text-green-800 rounded-full text-[10px] sm:text-xs font-medium hover:bg-green-200 transition-colors cursor-pointer flex-shrink-0"
+            >
+              <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden md:inline">Metodología de Transformación de Datos aplicada</span>
+              <span className="md:hidden">Metodología</span>
+              <Info className="w-2.5 h-2.5 sm:w-3 sm:h-3 opacity-60" />
+            </button>
+          )}
         </div>
       </div>
 

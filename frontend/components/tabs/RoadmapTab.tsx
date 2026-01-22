@@ -24,6 +24,8 @@ import {
   formatNumber,
   formatPercent,
 } from '../../config/designSystem';
+import OpportunityMatrixPro from '../OpportunityMatrixPro';
+import OpportunityPrioritizer from '../OpportunityPrioritizer';
 
 interface RoadmapTabProps {
   data: AnalysisData;
@@ -372,12 +374,6 @@ const formatROI = (roi: number, roiAjustado: number): {
   return { text: roiDisplay, showAjustado, isHighWarning };
 };
 
-const formatCurrency = (value: number): string => {
-  if (value >= 1000000) return `€${(value / 1000000).toFixed(1)}M`;
-  if (value >= 1000) return `€${Math.round(value / 1000)}K`;
-  return `€${value.toLocaleString()}`;
-};
-
 // ========== COMPONENTE: MAPA DE OPORTUNIDADES v3.5 ==========
 // Ejes actualizados:
 // - X: FACTIBILIDAD = Score Agentic Readiness (0-10)
@@ -415,24 +411,31 @@ const CPI_CONFIG = {
   RATE_AUGMENT: 0.15   // 15% mejora en optimización
 };
 
-// v3.6: Calcular ahorro TCO realista con fórmula explícita
+// Período de datos: el volumen corresponde a 11 meses, no es mensual
+const DATA_PERIOD_MONTHS = 11;
+
+// v4.2: Calcular ahorro TCO realista con fórmula explícita
+// IMPORTANTE: El volumen es de 11 meses, se convierte a anual: (Vol/11) × 12
 function calculateTCOSavings(volume: number, tier: AgenticTier): number {
   if (volume === 0) return 0;
 
   const { CPI_HUMANO, CPI_BOT, CPI_ASSIST, CPI_AUGMENT, RATE_AUTOMATE, RATE_ASSIST, RATE_AUGMENT } = CPI_CONFIG;
 
+  // Convertir volumen del período (11 meses) a volumen anual
+  const annualVolume = (volume / DATA_PERIOD_MONTHS) * 12;
+
   switch (tier) {
     case 'AUTOMATE':
-      // Ahorro = Vol × 12 × 70% × (CPI_humano - CPI_bot)
-      return Math.round(volume * 12 * RATE_AUTOMATE * (CPI_HUMANO - CPI_BOT));
+      // Ahorro = VolAnual × 70% × (CPI_humano - CPI_bot)
+      return Math.round(annualVolume * RATE_AUTOMATE * (CPI_HUMANO - CPI_BOT));
 
     case 'ASSIST':
-      // Ahorro = Vol × 12 × 30% × (CPI_humano - CPI_assist)
-      return Math.round(volume * 12 * RATE_ASSIST * (CPI_HUMANO - CPI_ASSIST));
+      // Ahorro = VolAnual × 30% × (CPI_humano - CPI_assist)
+      return Math.round(annualVolume * RATE_ASSIST * (CPI_HUMANO - CPI_ASSIST));
 
     case 'AUGMENT':
-      // Ahorro = Vol × 12 × 15% × (CPI_humano - CPI_augment)
-      return Math.round(volume * 12 * RATE_AUGMENT * (CPI_HUMANO - CPI_AUGMENT));
+      // Ahorro = VolAnual × 15% × (CPI_humano - CPI_augment)
+      return Math.round(annualVolume * RATE_AUGMENT * (CPI_HUMANO - CPI_AUGMENT));
 
     case 'HUMAN-ONLY':
     default:
@@ -1736,12 +1739,13 @@ export function RoadmapTab({ data }: RoadmapTabProps) {
   const totalVolume = Object.values(tierVolumes).reduce((a, b) => a + b, 0) || 1;
 
   // Calcular ahorros potenciales por tier usando fórmula TCO
+  // IMPORTANTE: El volumen es de 11 meses, se convierte a anual: (Vol/11) × 12
   const { CPI_HUMANO, CPI_BOT, CPI_ASSIST, CPI_AUGMENT, RATE_AUTOMATE, RATE_ASSIST, RATE_AUGMENT } = CPI_CONFIG;
 
   const potentialSavings = {
-    AUTOMATE: Math.round(tierVolumes.AUTOMATE * 12 * RATE_AUTOMATE * (CPI_HUMANO - CPI_BOT)),
-    ASSIST: Math.round(tierVolumes.ASSIST * 12 * RATE_ASSIST * (CPI_HUMANO - CPI_ASSIST)),
-    AUGMENT: Math.round(tierVolumes.AUGMENT * 12 * RATE_AUGMENT * (CPI_HUMANO - CPI_AUGMENT))
+    AUTOMATE: Math.round((tierVolumes.AUTOMATE / DATA_PERIOD_MONTHS) * 12 * RATE_AUTOMATE * (CPI_HUMANO - CPI_BOT)),
+    ASSIST: Math.round((tierVolumes.ASSIST / DATA_PERIOD_MONTHS) * 12 * RATE_ASSIST * (CPI_HUMANO - CPI_ASSIST)),
+    AUGMENT: Math.round((tierVolumes.AUGMENT / DATA_PERIOD_MONTHS) * 12 * RATE_AUGMENT * (CPI_HUMANO - CPI_AUGMENT))
   };
 
   // Colas que necesitan Wave 1 (Tier 3 + 4)
@@ -1797,7 +1801,7 @@ export function RoadmapTab({ data }: RoadmapTabProps) {
       borderColor: 'border-amber-200',
       inversionSetup: 35000,
       costoRecurrenteAnual: 40000,
-      ahorroAnual: potentialSavings.AUGMENT || 58000, // 15% efficiency
+      ahorroAnual: potentialSavings.AUGMENT, // 15% efficiency - calculado desde datos reales
       esCondicional: true,
       condicion: 'Requiere CV ≤75% post-Wave 1 en colas target',
       porQueNecesario: `Implementar herramientas de soporte para colas Tier 3 (Score 3.5-5.5). Objetivo: elevar score a ≥5.5 para habilitar Wave 3. Foco en ${tierCounts.AUGMENT.length} colas con ${tierVolumes.AUGMENT.toLocaleString()} int/mes.`,
@@ -1830,7 +1834,7 @@ export function RoadmapTab({ data }: RoadmapTabProps) {
       borderColor: 'border-blue-200',
       inversionSetup: 70000,
       costoRecurrenteAnual: 78000,
-      ahorroAnual: potentialSavings.ASSIST || 145000, // 30% efficiency
+      ahorroAnual: potentialSavings.ASSIST, // 30% efficiency - calculado desde datos reales
       esCondicional: true,
       condicion: 'Requiere Score ≥5.5 Y CV ≤90% Y Transfer ≤30%',
       porQueNecesario: `Copilot IA para agentes en colas Tier 2. Sugerencias en tiempo real, autocompletado, next-best-action. Objetivo: elevar score a ≥7.5 para Wave 4. Target: ${tierCounts.ASSIST.length} colas con ${tierVolumes.ASSIST.toLocaleString()} int/mes.`,
@@ -1864,7 +1868,7 @@ export function RoadmapTab({ data }: RoadmapTabProps) {
       borderColor: 'border-emerald-200',
       inversionSetup: 85000,
       costoRecurrenteAnual: 108000,
-      ahorroAnual: potentialSavings.AUTOMATE || 380000, // 70% containment
+      ahorroAnual: potentialSavings.AUTOMATE, // 70% containment - calculado desde datos reales
       esCondicional: true,
       condicion: 'Requiere Score ≥7.5 Y CV ≤75% Y Transfer ≤20% Y FCR ≥50%',
       porQueNecesario: `Automatización end-to-end para colas Tier 1. Voicebot/Chatbot transaccional con 70% contención. Solo viable con procesos maduros. Target actual: ${tierCounts.AUTOMATE.length} colas con ${tierVolumes.AUTOMATE.toLocaleString()} int/mes.`,
@@ -1906,9 +1910,10 @@ export function RoadmapTab({ data }: RoadmapTabProps) {
   const wave4Setup = 85000;
   const wave4Rec = 108000;
 
-  const wave2Savings = potentialSavings.AUGMENT || Math.round(tierVolumes.AUGMENT * 12 * 0.15 * 0.33);
-  const wave3Savings = potentialSavings.ASSIST || Math.round(tierVolumes.ASSIST * 12 * 0.30 * 0.83);
-  const wave4Savings = potentialSavings.AUTOMATE || Math.round(tierVolumes.AUTOMATE * 12 * 0.70 * 2.18);
+  // Usar potentialSavings (ya corregidos con factor 12/11)
+  const wave2Savings = potentialSavings.AUGMENT;
+  const wave3Savings = potentialSavings.ASSIST;
+  const wave4Savings = potentialSavings.AUTOMATE;
 
   // Escenario 1: Conservador (Wave 1-2: FOUNDATION + AUGMENT)
   const consInversion = wave1Setup + wave2Setup;
@@ -2520,85 +2525,17 @@ export function RoadmapTab({ data }: RoadmapTabProps) {
                 </div>
 
                 <div className="p-4 space-y-4">
-                  {/* ENFOQUE DUAL: Explicación + Tabla comparativa */}
+                  {/* ENFOQUE DUAL: Párrafo explicativo */}
                   {recType === 'DUAL' && (
-                    <>
-                      {/* Explicación de los dos tracks */}
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <p className="font-semibold text-gray-800 mb-1">Track A: Quick Win</p>
-                          <p className="text-xs text-gray-600">
-                            Automatización inmediata de las colas ya preparadas (Tier AUTOMATE).
-                            Genera retorno desde el primer mes y valida el modelo de IA con bajo riesgo.
-                          </p>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <p className="font-semibold text-gray-800 mb-1">Track B: Foundation</p>
-                          <p className="text-xs text-gray-600">
-                            Preparación de las colas que aún no están listas (Tier 3-4).
-                            Estandariza procesos y reduce variabilidad para habilitar automatización futura.
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Tabla comparativa */}
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="text-left py-2 font-medium text-gray-500"></th>
-                            <th className="text-center py-2 font-medium text-gray-700">Quick Win</th>
-                            <th className="text-center py-2 font-medium text-gray-700">Foundation</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-gray-600">
-                          <tr className="border-b border-gray-100">
-                            <td className="py-2 text-gray-500 text-xs">Alcance</td>
-                            <td className="py-2 text-center">
-                              <span className="font-medium text-gray-800">{pilotQueues.length} colas</span>
-                              <span className="text-xs text-gray-400 block">{pilotVolume.toLocaleString()} int/mes</span>
-                            </td>
-                            <td className="py-2 text-center">
-                              <span className="font-medium text-gray-800">{tierCounts['HUMAN-ONLY'].length + tierCounts.AUGMENT.length} colas</span>
-                              <span className="text-xs text-gray-400 block">Wave 1 + Wave 2</span>
-                            </td>
-                          </tr>
-                          <tr className="border-b border-gray-100">
-                            <td className="py-2 text-gray-500 text-xs">Inversión</td>
-                            <td className="py-2 text-center font-medium text-gray-800">{formatCurrency(pilotInversionTotal)}</td>
-                            <td className="py-2 text-center font-medium text-gray-800">{formatCurrency(wave1Setup + wave2Setup)}</td>
-                          </tr>
-                          <tr className="border-b border-gray-100">
-                            <td className="py-2 text-gray-500 text-xs">Retorno</td>
-                            <td className="py-2 text-center">
-                              <span className="font-medium text-gray-800">{formatCurrency(pilotAhorroAjustado)}/año</span>
-                              <span className="text-xs text-gray-400 block">directo (ajustado 50%)</span>
-                            </td>
-                            <td className="py-2 text-center">
-                              <span className="font-medium text-gray-800">{formatCurrency(potentialSavings.ASSIST + potentialSavings.AUGMENT)}/año</span>
-                              <span className="text-xs text-gray-400 block">habilitado (indirecto)</span>
-                            </td>
-                          </tr>
-                          <tr className="border-b border-gray-100">
-                            <td className="py-2 text-gray-500 text-xs">Timeline</td>
-                            <td className="py-2 text-center text-gray-800">2-3 meses</td>
-                            <td className="py-2 text-center text-gray-800">6-9 meses</td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 text-gray-500 text-xs">ROI Year 1</td>
-                            <td className="py-2 text-center">
-                              <span className="font-semibold text-gray-900">{pilotROIDisplay.display}</span>
-                            </td>
-                            <td className="py-2 text-center text-gray-500 text-xs">No aplica (habilitador)</td>
-                          </tr>
-                        </tbody>
-                      </table>
-
-                      <div className="text-xs text-gray-500 border-t border-gray-100 pt-3">
-                        <strong className="text-gray-700">¿Por qué dos tracks?</strong> Quick Win genera caja y confianza desde el inicio.
-                        Foundation prepara el {Math.round(assistPct + augmentPct)}% restante del volumen para fases posteriores.
-                        Ejecutarlos en paralelo acelera el time-to-value total.
-                      </div>
-                    </>
+                    <p className="text-sm text-gray-600 leading-relaxed">
+                      La Estrategia Dual consiste en ejecutar dos líneas de trabajo en paralelo:
+                      <strong className="text-gray-800"> Quick Win</strong> automatiza inmediatamente las {pilotQueues.length} colas
+                      ya preparadas (Tier AUTOMATE, {Math.round(totalVolume > 0 ? (tierVolumes.AUTOMATE / totalVolume) * 100 : 0)}% del volumen), generando retorno desde el primer mes;
+                      mientras que <strong className="text-gray-800">Foundation</strong> prepara el {Math.round(assistPct + augmentPct)}%
+                      restante del volumen (Tiers ASSIST y AUGMENT) estandarizando procesos y reduciendo variabilidad para habilitar
+                      automatización futura. Este enfoque maximiza el time-to-value: Quick Win financia la transformación y genera
+                      confianza organizacional, mientras Foundation amplía progresivamente el alcance de la automatización.
+                    </p>
                   )}
 
                   {/* FOUNDATION PRIMERO */}
@@ -2764,6 +2701,16 @@ export function RoadmapTab({ data }: RoadmapTabProps) {
           </div>
         )}
       </Card>
+
+      {/* ═══════════════════════════════════════════════════════════════════════════
+          OPORTUNIDADES PRIORIZADAS - Nueva visualización clara y accionable
+          ═══════════════════════════════════════════════════════════════════════════ */}
+      {data.opportunities && data.opportunities.length > 0 && (
+        <OpportunityPrioritizer
+          opportunities={data.opportunities}
+          drilldownData={data.drilldownData}
+        />
+      )}
 
     </div>
   );
