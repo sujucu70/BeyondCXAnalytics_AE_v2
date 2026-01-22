@@ -9,6 +9,7 @@ import {
   XCircle,
   HelpCircle,
   Lightbulb,
+  FileText,
 } from 'lucide-react';
 import type { AnalysisData, HeatmapDataPoint, DrilldownDataPoint } from '../../types';
 import {
