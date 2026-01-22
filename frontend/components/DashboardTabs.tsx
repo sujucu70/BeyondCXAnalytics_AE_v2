@@ -36,7 +36,7 @@ export function DashboardTabs({
       case 'roadmap':
         return <RoadmapTab data={data} />;
       case 'law10':
-        return <Law10Tab data={data} onTabChange={setActiveTab} />;
+        return <Law10Tab data={data} />;
       default:
         return <ExecutiveSummaryTab data={data} />;
     }
