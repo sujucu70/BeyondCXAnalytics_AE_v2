@@ -10,6 +10,7 @@ import {
   HelpCircle,
   Lightbulb,
   FileText,
+  TrendingUp,
 } from 'lucide-react';
 import type { AnalysisData, HeatmapDataPoint, DrilldownDataPoint } from '../../types';
 import {
