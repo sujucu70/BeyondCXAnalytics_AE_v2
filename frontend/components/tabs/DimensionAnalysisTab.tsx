@@ -78,7 +78,7 @@ function generateCausalAnalysis(
     ? heatmapData.reduce((sum, h) => sum + (h.variability?.cv_aht || 0) * h.volume, 0) / totalVolume
     : 0;
   const avgTransferRate = totalVolume > 0
-    ? heatmapData.reduce((sum, h) => sum + (h.variability?.transfer_rate || 0) * h.volume, 0) / totalVolume
+    ? heatmapData.reduce((sum, h) => sum + h.metrics.transfer_rate * h.volume, 0) / totalVolume
     : 0;
   // Usar FCR Técnico (100 - transfer_rate) en lugar de FCR Real (con filtro recontacto 7d)
   // FCR Técnico es más comparable con benchmarks de industria
@@ -99,7 +99,7 @@ function generateCausalAnalysis(
   const skillsHighCV = heatmapData.filter(h => (h.variability?.cv_aht || 0) > 100);
   // Usar FCR Técnico para identificar skills con bajo FCR
   const skillsLowFCR = heatmapData.filter(h => (h.metrics.fcr_tecnico ?? (100 - h.metrics.transfer_rate)) < 50);
-  const skillsHighTransfer = heatmapData.filter(h => (h.variability?.transfer_rate || 0) > 20);
+  const skillsHighTransfer = heatmapData.filter(h => h.metrics.transfer_rate > 20);
 
   // Parsear P50 AHT del KPI del header para consistencia visual
   // El KPI puede ser "345s (P50)" o similar
