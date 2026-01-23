@@ -1363,14 +1363,15 @@ function generateDimensionsFromRealData(
       kpi: { label: 'CSAT', value: avgCsat > 0 ? `${Math.round(avgCsat)}/100` : 'N/A' },
       icon: Smile
     },
-    // 6. ECONOMÍA - CPI
+    // 6. ECONOMÍA - CPI (benchmark aerolíneas: p25=2.20, p50=3.50, p75=4.50, p90=5.50)
     {
       id: 'economy_cpi',
       name: 'economy_cpi',
       title: 'Economía Operacional',
-      score: costPerInteraction < 4 ? 85 : costPerInteraction < 5 ? 70 : costPerInteraction < 6 ? 55 : 40,
-      percentile: costPerInteraction < 4.5 ? 70 : costPerInteraction < 5.5 ? 50 : 30,
-      summary: `CPI: €${costPerInteraction.toFixed(2)} por interacción. Coste anual: €${totalCost.toLocaleString('es-ES')}. Benchmark sector: €5.00 (Fuente: Gartner 2024).`,
+      // Score basado en percentiles aerolíneas (CPI invertido: menor = mejor)
+      score: costPerInteraction <= 2.20 ? 100 : costPerInteraction <= 3.50 ? 80 : costPerInteraction <= 4.50 ? 60 : costPerInteraction <= 5.50 ? 40 : 20,
+      percentile: costPerInteraction <= 2.20 ? 90 : costPerInteraction <= 3.50 ? 70 : costPerInteraction <= 4.50 ? 50 : costPerInteraction <= 5.50 ? 25 : 10,
+      summary: `CPI: €${costPerInteraction.toFixed(2)} por interacción. Coste anual: €${totalCost.toLocaleString('es-ES')}. Benchmark sector aerolíneas: €3.50.`,
       kpi: { label: 'Coste/Interacción', value: `€${costPerInteraction.toFixed(2)}` },
       icon: DollarSign
     },

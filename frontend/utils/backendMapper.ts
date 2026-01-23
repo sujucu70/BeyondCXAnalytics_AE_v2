@@ -637,8 +637,9 @@ function buildEconomyDimension(
   const op = raw?.operational_performance;
   const totalAnnual = safeNumber(econ?.cost_breakdown?.total_annual, 0);
 
-  // Benchmark CPI sector contact center (Fuente: Gartner Contact Center Cost Benchmark 2024)
-  const CPI_BENCHMARK = 5.00;
+  // Benchmark CPI aerolíneas (consistente con ExecutiveSummaryTab)
+  // p25: 2.20, p50: 3.50, p75: 4.50, p90: 5.50
+  const CPI_BENCHMARK = 3.50;  // p50 aerolíneas
 
   if (totalAnnual <= 0 || totalInteractions <= 0) {
     return undefined;
@@ -651,20 +652,20 @@ function buildEconomyDimension(
   // Calcular CPI usando cost_volume (non-abandoned) como denominador
   const cpi = costVolume > 0 ? totalAnnual / costVolume : totalAnnual / totalInteractions;
 
-  // Score basado en comparación con benchmark (€5.00)
-  // CPI <= 4.00 = 100pts (excelente)
-  // CPI 4.00-5.00 = 80pts (en benchmark)
-  // CPI 5.00-6.00 = 60pts (por encima)
-  // CPI 6.00-7.00 = 40pts (alto)
-  // CPI > 7.00 = 20pts (crítico)
+  // Score basado en percentiles de aerolíneas (CPI invertido: menor = mejor)
+  // CPI <= 2.20 (p25) = 100pts (excelente, top 25%)
+  // CPI 2.20-3.50 (p25-p50) = 80pts (bueno, top 50%)
+  // CPI 3.50-4.50 (p50-p75) = 60pts (promedio)
+  // CPI 4.50-5.50 (p75-p90) = 40pts (por debajo)
+  // CPI > 5.50 (>p90) = 20pts (crítico)
   let score: number;
-  if (cpi <= 4.00) {
+  if (cpi <= 2.20) {
     score = 100;
-  } else if (cpi <= 5.00) {
+  } else if (cpi <= 3.50) {
     score = 80;
-  } else if (cpi <= 6.00) {
+  } else if (cpi <= 4.50) {
     score = 60;
-  } else if (cpi <= 7.00) {
+  } else if (cpi <= 5.50) {
     score = 40;
   } else {
     score = 20;
@@ -676,7 +677,7 @@ function buildEconomyDimension(
   let summary = `Coste por interacción: €${cpi.toFixed(2)} vs benchmark €${CPI_BENCHMARK.toFixed(2)}. `;
   if (cpi <= CPI_BENCHMARK) {
     summary += 'Eficiencia de costes óptima, por debajo del benchmark del sector.';
-  } else if (cpi <= 6.00) {
+  } else if (cpi <= 4.50) {
     summary += 'Coste ligeramente por encima del benchmark, oportunidad de optimización.';
   } else {
     summary += 'Coste elevado respecto al sector. Priorizar iniciativas de eficiencia.';

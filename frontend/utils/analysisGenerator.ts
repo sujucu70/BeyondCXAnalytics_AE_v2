@@ -840,18 +840,28 @@ export const generateAnalysis = async (
         );
         if (economyDimIdx >= 0 && globalCPI > 0) {
           // Usar benchmark de aerolíneas (€3.50) para consistencia con ExecutiveSummaryTab
+          // Percentiles: p25=2.20, p50=3.50, p75=4.50, p90=5.50
           const CPI_BENCHMARK = 3.50;
           const cpiDiff = globalCPI - CPI_BENCHMARK;
           // Para CPI invertido: menor es mejor
           const cpiStatus = cpiDiff <= 0 ? 'positive' : cpiDiff <= 0.5 ? 'neutral' : 'negative';
 
+          // Calcular score basado en percentiles aerolíneas
+          let newScore: number;
+          if (globalCPI <= 2.20) newScore = 100;
+          else if (globalCPI <= 3.50) newScore = 80;
+          else if (globalCPI <= 4.50) newScore = 60;
+          else if (globalCPI <= 5.50) newScore = 40;
+          else newScore = 20;
+
+          mapped.dimensions[economyDimIdx].score = newScore;
           mapped.dimensions[economyDimIdx].kpi = {
             label: 'Coste por Interacción',
             value: `€${globalCPI.toFixed(2)}`,
             change: `vs benchmark €${CPI_BENCHMARK.toFixed(2)}`,
             changeType: cpiStatus as 'positive' | 'neutral' | 'negative'
           };
-          console.log(`💰 CPI sincronizado: €${globalCPI.toFixed(2)} (desde heatmapData, consistente con Executive Summary)`);
+          console.log(`💰 CPI sincronizado: €${globalCPI.toFixed(2)}, score: ${newScore}`);
         }
       }
 
@@ -1107,11 +1117,21 @@ export const generateAnalysisFromCache = async (
         console.log('  - OLD KPI value:', oldKpi?.value);
 
         // Usar benchmark de aerolíneas (€3.50) para consistencia con ExecutiveSummaryTab
+        // Percentiles: p25=2.20, p50=3.50, p75=4.50, p90=5.50
         const CPI_BENCHMARK = 3.50;
         const cpiDiff = globalCPI - CPI_BENCHMARK;
         // Para CPI invertido: menor es mejor
         const cpiStatus = cpiDiff <= 0 ? 'positive' : cpiDiff <= 0.5 ? 'neutral' : 'negative';
 
+        // Calcular score basado en percentiles aerolíneas
+        let newScore: number;
+        if (globalCPI <= 2.20) newScore = 100;
+        else if (globalCPI <= 3.50) newScore = 80;
+        else if (globalCPI <= 4.50) newScore = 60;
+        else if (globalCPI <= 5.50) newScore = 40;
+        else newScore = 20;
+
+        mapped.dimensions[economyDimIdx].score = newScore;
         mapped.dimensions[economyDimIdx].kpi = {
           label: 'Coste por Interacción',
           value: `€${globalCPI.toFixed(2)}`,
@@ -1119,6 +1139,7 @@ export const generateAnalysisFromCache = async (
           changeType: cpiStatus as 'positive' | 'neutral' | 'negative'
         };
         console.log('  - NEW KPI value:', mapped.dimensions[economyDimIdx].kpi.value);
+        console.log('  - NEW score:', newScore);
         console.log(`💰 CPI sincronizado (cache): €${globalCPI.toFixed(2)}`);
       } else {
         console.warn('⚠️ CPI sync skipped: economyDimIdx=', economyDimIdx, 'globalCPI=', globalCPI);
