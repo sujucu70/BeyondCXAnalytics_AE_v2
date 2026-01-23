@@ -1069,6 +1069,15 @@ export const generateAnalysisFromCache = async (
       const totalCostVolume = heatmapData.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0);
       const hasCpiField = heatmapData.some(h => h.cpi !== undefined && h.cpi > 0);
 
+      // DEBUG: Log CPI calculation details
+      console.log('🔍 CPI SYNC DEBUG (cache):');
+      console.log('  - heatmapData length:', heatmapData.length);
+      console.log('  - hasCpiField:', hasCpiField);
+      console.log('  - totalCostVolume:', totalCostVolume);
+      if (hasCpiField) {
+        console.log('  - Sample CPIs:', heatmapData.slice(0, 3).map(h => ({ skill: h.skill, cpi: h.cpi, cost_volume: h.cost_volume })));
+      }
+
       let globalCPI: number;
       if (hasCpiField) {
         globalCPI = totalCostVolume > 0
@@ -1076,15 +1085,25 @@ export const generateAnalysisFromCache = async (
           : 0;
       } else {
         const totalAnnualCost = heatmapData.reduce((sum, h) => sum + (h.annual_cost || 0), 0);
+        console.log('  - totalAnnualCost (fallback):', totalAnnualCost);
         globalCPI = totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : 0;
       }
+      console.log('  - globalCPI calculated:', globalCPI.toFixed(4));
 
       // Buscar tanto economy_costs (backend) como economy_cpi (frontend fallback)
+      const dimensionIds = mapped.dimensions.map(d => ({ id: d.id, name: d.name }));
+      console.log('  - Available dimensions:', dimensionIds);
+
       const economyDimIdx = mapped.dimensions.findIndex(d =>
         d.id === 'economy_costs' || d.name === 'economy_costs' ||
         d.id === 'economy_cpi' || d.name === 'economy_cpi'
       );
+      console.log('  - economyDimIdx:', economyDimIdx);
+
       if (economyDimIdx >= 0 && globalCPI > 0) {
+        const oldKpi = mapped.dimensions[economyDimIdx].kpi;
+        console.log('  - OLD KPI value:', oldKpi?.value);
+
         const CPI_BENCHMARK = 5.00;
         const cpiDiff = globalCPI - CPI_BENCHMARK;
         const cpiStatus = cpiDiff <= 0 ? 'positive' : cpiDiff <= 0.5 ? 'neutral' : 'negative';
@@ -1095,7 +1114,10 @@ export const generateAnalysisFromCache = async (
           change: `vs benchmark €${CPI_BENCHMARK.toFixed(2)}`,
           changeType: cpiStatus as 'positive' | 'neutral' | 'negative'
         };
+        console.log('  - NEW KPI value:', mapped.dimensions[economyDimIdx].kpi.value);
         console.log(`💰 CPI sincronizado (cache): €${globalCPI.toFixed(2)}`);
+      } else {
+        console.warn('⚠️ CPI sync skipped: economyDimIdx=', economyDimIdx, 'globalCPI=', globalCPI);
       }
     }
 
