@@ -189,6 +189,17 @@ export function generateAnalysisFromRealData(
   // Coste total
   const totalCost = Math.round(skillMetrics.reduce((sum, s) => sum + s.total_cost, 0));
 
+  // === CPI CENTRALIZADO: Calcular UNA sola vez desde heatmapData ===
+  // Esta es la ÚNICA fuente de verdad para CPI, igual que ExecutiveSummaryTab
+  const totalCostVolume = heatmapData.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0);
+  const totalAnnualCost = heatmapData.reduce((sum, h) => sum + (h.annual_cost || 0), 0);
+  const hasCpiField = heatmapData.some(h => h.cpi !== undefined && h.cpi > 0);
+  const globalCPI = hasCpiField
+    ? (totalCostVolume > 0
+        ? heatmapData.reduce((sum, h) => sum + (h.cpi || 0) * (h.cost_volume || h.volume), 0) / totalCostVolume
+        : 0)
+    : (totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : 0);
+
   // KPIs principales
   const summaryKpis: Kpi[] = [
     { label: "Interacciones Totales", value: totalInteractions.toLocaleString('es-ES') },
@@ -196,17 +207,18 @@ export function generateAnalysisFromRealData(
     { label: "FCR Técnico", value: `${avgFCR}%` },
     { label: "CSAT", value: `${(avgCsat / 20).toFixed(1)}/5` }
   ];
-  
+
   // Health Score basado en métricas reales
   const overallHealthScore = calculateHealthScore(heatmapData);
-  
-  // Dimensiones (simplificadas para datos reales)
+
+  // Dimensiones (simplificadas para datos reales) - pasar CPI centralizado
   const dimensions: DimensionAnalysis[] = generateDimensionsFromRealData(
     interactions,
     skillMetrics,
     avgCsat,
     avgAHT,
-    hourlyDistribution
+    hourlyDistribution,
+    globalCPI  // CPI calculado desde heatmapData
   );
   
   // Agentic Readiness Score
@@ -1212,7 +1224,8 @@ function generateDimensionsFromRealData(
   metrics: SkillMetrics[],
   avgCsat: number,
   avgAHT: number,
-  hourlyDistribution: { hourly: number[]; off_hours_pct: number; peak_hours: number[] }
+  hourlyDistribution: { hourly: number[]; off_hours_pct: number; peak_hours: number[] },
+  globalCPI: number  // CPI calculado centralmente desde heatmapData
 ): DimensionAnalysis[] {
   const totalVolume = interactions.length;
   const avgCV = metrics.reduce((sum, m) => sum + m.cv_aht, 0) / metrics.length;
@@ -1270,17 +1283,10 @@ function generateDimensionsFromRealData(
 
   volumetryScore = Math.max(0, Math.min(100, Math.round(volumetryScore)));
 
-  // === CPI: Coste por interacción (IDÉNTICO a Executive Summary) ===
-  // Usar cost_volume (non-abandon) como denominador
-  const totalCostVolume = metrics.reduce((sum, m) => sum + (m.cost_volume || m.volume), 0);
-  const totalAnnualCost = metrics.reduce((sum, m) => sum + (m.total_cost || 0), 0);
-  // Usar CPI pre-calculado si disponible, sino calcular desde total_cost / cost_volume
-  const hasCpiField = metrics.some(m => m.cpi !== undefined && m.cpi > 0);
-  const costPerInteraction = hasCpiField
-    ? (totalCostVolume > 0
-        ? metrics.reduce((sum, m) => sum + (m.cpi || 0) * (m.cost_volume || m.volume), 0) / totalCostVolume
-        : 0)
-    : (totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : 0);
+  // === CPI: Usar el valor centralizado pasado como parámetro ===
+  // globalCPI ya fue calculado en generateAnalysisFromRealData desde heatmapData
+  // Esto garantiza consistencia con ExecutiveSummaryTab
+  const costPerInteraction = globalCPI;
 
   // Calcular Agentic Score
   const predictability = Math.max(0, Math.min(10, 10 - ((avgCV - 0.3) / 1.2 * 10)));
