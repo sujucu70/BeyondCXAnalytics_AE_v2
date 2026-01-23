@@ -574,6 +574,29 @@ function DimensionCard({
 // ========== v3.16: COMPONENTE PRINCIPAL ==========
 
 export function DimensionAnalysisTab({ data }: DimensionAnalysisTabProps) {
+  // DEBUG: Verificar CPI en dimensión vs heatmapData
+  const economyDim = data.dimensions.find(d =>
+    d.id === 'economy_costs' || d.name === 'economy_costs' ||
+    d.id === 'economy_cpi' || d.name === 'economy_cpi'
+  );
+  const heatmapData = data.heatmapData;
+  const totalCostVolume = heatmapData.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0);
+  const hasCpiField = heatmapData.some(h => h.cpi !== undefined && h.cpi > 0);
+  const calculatedCPI = hasCpiField
+    ? (totalCostVolume > 0
+        ? heatmapData.reduce((sum, h) => sum + (h.cpi || 0) * (h.cost_volume || h.volume), 0) / totalCostVolume
+        : 0)
+    : (totalCostVolume > 0
+        ? heatmapData.reduce((sum, h) => sum + (h.annual_cost || 0), 0) / totalCostVolume
+        : 0);
+
+  console.log('🔍 DimensionAnalysisTab DEBUG:');
+  console.log('  - economyDim found:', !!economyDim, economyDim?.id || economyDim?.name);
+  console.log('  - economyDim.kpi.value:', economyDim?.kpi?.value);
+  console.log('  - calculatedCPI from heatmapData:', `€${calculatedCPI.toFixed(2)}`);
+  console.log('  - hasCpiField:', hasCpiField);
+  console.log('  - MATCH:', economyDim?.kpi?.value === `€${calculatedCPI.toFixed(2)}`);
+
   // Filter out agentic_readiness (has its own tab)
   const coreDimensions = data.dimensions.filter(d => d.name !== 'agentic_readiness');
 

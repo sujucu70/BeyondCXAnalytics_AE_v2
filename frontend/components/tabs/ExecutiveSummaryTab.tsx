@@ -427,6 +427,9 @@ function UnifiedKPIBenchmark({ heatmapData }: { heatmapData: HeatmapDataPoint[] 
         : 0)
     : (totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : 0);
 
+  // DEBUG: Log CPI calculation
+  console.log('🔍 ExecutiveSummaryTab CPI:', `€${cpi.toFixed(2)}`, { hasCpiField, totalCostVolume });
+
   // Volume-weighted metrics
   const operacion = {
     aht: aht,
