@@ -811,6 +811,44 @@ export const generateAnalysis = async (
         console.log('📊 Heatmap generado desde backend (fallback - sin parsedInteractions)');
       }
 
+      // v4.5: SINCRONIZAR CPI de dimensión economía con heatmapData para consistencia entre tabs
+      // El heatmapData contiene el CPI calculado correctamente (con cost_volume ponderado)
+      // La dimensión economía fue calculada en mapBackendResultsToAnalysisData con otra fórmula
+      // Actualizamos la dimensión para que muestre el mismo valor que Executive Summary
+      if (mapped.heatmapData && mapped.heatmapData.length > 0) {
+        const heatmapData = mapped.heatmapData;
+        const totalCostVolume = heatmapData.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0);
+        const hasCpiField = heatmapData.some(h => h.cpi !== undefined && h.cpi > 0);
+
+        let globalCPI: number;
+        if (hasCpiField) {
+          // CPI real disponible: promedio ponderado por cost_volume
+          globalCPI = totalCostVolume > 0
+            ? heatmapData.reduce((sum, h) => sum + (h.cpi || 0) * (h.cost_volume || h.volume), 0) / totalCostVolume
+            : 0;
+        } else {
+          // Fallback: annual_cost / cost_volume
+          const totalAnnualCost = heatmapData.reduce((sum, h) => sum + (h.annual_cost || 0), 0);
+          globalCPI = totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : 0;
+        }
+
+        // Actualizar la dimensión de economía con el CPI calculado desde heatmap
+        const economyDimIdx = mapped.dimensions.findIndex(d => d.id === 'economy_costs' || d.name === 'economy_costs');
+        if (economyDimIdx >= 0 && globalCPI > 0) {
+          const CPI_BENCHMARK = 5.00;
+          const cpiDiff = globalCPI - CPI_BENCHMARK;
+          const cpiStatus = cpiDiff <= 0 ? 'positive' : cpiDiff <= 0.5 ? 'neutral' : 'negative';
+
+          mapped.dimensions[economyDimIdx].kpi = {
+            label: 'Coste por Interacción',
+            value: `€${globalCPI.toFixed(2)}`,
+            change: `vs benchmark €${CPI_BENCHMARK.toFixed(2)}`,
+            changeType: cpiStatus as 'positive' | 'neutral' | 'negative'
+          };
+          console.log(`💰 CPI sincronizado: €${globalCPI.toFixed(2)} (desde heatmapData, consistente con Executive Summary)`);
+        }
+      }
+
       // v3.5: Calcular drilldownData PRIMERO (necesario para opportunities y roadmap)
       if (parsedInteractions && parsedInteractions.length > 0) {
         mapped.drilldownData = calculateDrilldownMetrics(parsedInteractions, costPerHour);
