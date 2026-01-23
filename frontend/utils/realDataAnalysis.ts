@@ -1270,13 +1270,17 @@ function generateDimensionsFromRealData(
 
   volumetryScore = Math.max(0, Math.min(100, Math.round(volumetryScore)));
 
-  // === CPI: Coste por interacción (consistente con Executive Summary) ===
-  // Usar cost_volume (non-abandon) como denominador, igual que heatmapData
-  const totalCostVolume = metrics.reduce((sum, m) => sum + m.cost_volume, 0);
+  // === CPI: Coste por interacción (IDÉNTICO a Executive Summary) ===
+  // Usar cost_volume (non-abandon) como denominador
+  const totalCostVolume = metrics.reduce((sum, m) => sum + (m.cost_volume || m.volume), 0);
+  const totalAnnualCost = metrics.reduce((sum, m) => sum + (m.total_cost || 0), 0);
   // Usar CPI pre-calculado si disponible, sino calcular desde total_cost / cost_volume
-  const costPerInteraction = totalCostVolume > 0
-    ? metrics.reduce((sum, m) => sum + (m.cpi * m.cost_volume), 0) / totalCostVolume
-    : (totalCost / totalVolume);
+  const hasCpiField = metrics.some(m => m.cpi !== undefined && m.cpi > 0);
+  const costPerInteraction = hasCpiField
+    ? (totalCostVolume > 0
+        ? metrics.reduce((sum, m) => sum + (m.cpi || 0) * (m.cost_volume || m.volume), 0) / totalCostVolume
+        : 0)
+    : (totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : 0);
 
   // Calcular Agentic Score
   const predictability = Math.max(0, Math.min(10, 10 - ((avgCV - 0.3) / 1.2 * 10)));
