@@ -311,6 +311,7 @@ function generateCausalAnalysis(
       break;
 
     case 'economy_cpi':
+    case 'economy_costs':  // También manejar el ID del backend
       // Análisis de CPI
       if (CPI > 3.5) {
         const excessCPI = CPI - CPI_TCO;

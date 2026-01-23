@@ -833,7 +833,11 @@ export const generateAnalysis = async (
         }
 
         // Actualizar la dimensión de economía con el CPI calculado desde heatmap
-        const economyDimIdx = mapped.dimensions.findIndex(d => d.id === 'economy_costs' || d.name === 'economy_costs');
+        // Buscar tanto economy_costs (backend) como economy_cpi (frontend fallback)
+        const economyDimIdx = mapped.dimensions.findIndex(d =>
+          d.id === 'economy_costs' || d.name === 'economy_costs' ||
+          d.id === 'economy_cpi' || d.name === 'economy_cpi'
+        );
         if (economyDimIdx >= 0 && globalCPI > 0) {
           const CPI_BENCHMARK = 5.00;
           const cpiDiff = globalCPI - CPI_BENCHMARK;
@@ -1057,6 +1061,43 @@ export const generateAnalysisFromCache = async (
       segmentMapping
     );
     console.log('📊 Heatmap data points:', mapped.heatmapData?.length || 0);
+
+    // v4.6: SINCRONIZAR CPI de dimensión economía con heatmapData para consistencia entre tabs
+    // (Mismo fix que en generateAnalysis - necesario para path de cache)
+    if (mapped.heatmapData && mapped.heatmapData.length > 0) {
+      const heatmapData = mapped.heatmapData;
+      const totalCostVolume = heatmapData.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0);
+      const hasCpiField = heatmapData.some(h => h.cpi !== undefined && h.cpi > 0);
+
+      let globalCPI: number;
+      if (hasCpiField) {
+        globalCPI = totalCostVolume > 0
+          ? heatmapData.reduce((sum, h) => sum + (h.cpi || 0) * (h.cost_volume || h.volume), 0) / totalCostVolume
+          : 0;
+      } else {
+        const totalAnnualCost = heatmapData.reduce((sum, h) => sum + (h.annual_cost || 0), 0);
+        globalCPI = totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : 0;
+      }
+
+      // Buscar tanto economy_costs (backend) como economy_cpi (frontend fallback)
+      const economyDimIdx = mapped.dimensions.findIndex(d =>
+        d.id === 'economy_costs' || d.name === 'economy_costs' ||
+        d.id === 'economy_cpi' || d.name === 'economy_cpi'
+      );
+      if (economyDimIdx >= 0 && globalCPI > 0) {
+        const CPI_BENCHMARK = 5.00;
+        const cpiDiff = globalCPI - CPI_BENCHMARK;
+        const cpiStatus = cpiDiff <= 0 ? 'positive' : cpiDiff <= 0.5 ? 'neutral' : 'negative';
+
+        mapped.dimensions[economyDimIdx].kpi = {
+          label: 'Coste por Interacción',
+          value: `€${globalCPI.toFixed(2)}`,
+          change: `vs benchmark €${CPI_BENCHMARK.toFixed(2)}`,
+          changeType: cpiStatus as 'positive' | 'neutral' | 'negative'
+        };
+        console.log(`💰 CPI sincronizado (cache): €${globalCPI.toFixed(2)}`);
+      }
+    }
 
     // === DrilldownData: usar cacheado (rápido) o fallback a heatmap ===
     if (cachedDrilldownData && cachedDrilldownData.length > 0) {
