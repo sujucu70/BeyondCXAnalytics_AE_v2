@@ -61,8 +61,8 @@ function generateCausalAnalysis(
     annualizationFactor = 365 / daysCovered;
   }
 
-  // v3.11: CPI consistente con Executive Summary
-  const CPI_TCO = 2.33;  // Benchmark para cálculos de impacto cuando no hay CPI real
+  // v3.11: CPI consistente con Executive Summary - benchmark aerolíneas p50
+  const CPI_TCO = 3.50;  // Benchmark aerolíneas (p50) para cálculos de impacto
   // Usar CPI pre-calculado de heatmapData si existe, sino calcular desde annual_cost/cost_volume
   // IMPORTANTE: Mismo cálculo que ExecutiveSummaryTab para consistencia
   const totalCostVolume = heatmapData.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0);
