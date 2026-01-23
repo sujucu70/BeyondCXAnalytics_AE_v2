@@ -839,8 +839,10 @@ export const generateAnalysis = async (
           d.id === 'economy_cpi' || d.name === 'economy_cpi'
         );
         if (economyDimIdx >= 0 && globalCPI > 0) {
-          const CPI_BENCHMARK = 5.00;
+          // Usar benchmark de aerolíneas (€3.50) para consistencia con ExecutiveSummaryTab
+          const CPI_BENCHMARK = 3.50;
           const cpiDiff = globalCPI - CPI_BENCHMARK;
+          // Para CPI invertido: menor es mejor
           const cpiStatus = cpiDiff <= 0 ? 'positive' : cpiDiff <= 0.5 ? 'neutral' : 'negative';
 
           mapped.dimensions[economyDimIdx].kpi = {
@@ -1104,8 +1106,10 @@ export const generateAnalysisFromCache = async (
         const oldKpi = mapped.dimensions[economyDimIdx].kpi;
         console.log('  - OLD KPI value:', oldKpi?.value);
 
-        const CPI_BENCHMARK = 5.00;
+        // Usar benchmark de aerolíneas (€3.50) para consistencia con ExecutiveSummaryTab
+        const CPI_BENCHMARK = 3.50;
         const cpiDiff = globalCPI - CPI_BENCHMARK;
+        // Para CPI invertido: menor es mejor
         const cpiStatus = cpiDiff <= 0 ? 'positive' : cpiDiff <= 0.5 ? 'neutral' : 'negative';
 
         mapped.dimensions[economyDimIdx].kpi = {
