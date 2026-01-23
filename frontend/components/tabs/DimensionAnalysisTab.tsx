@@ -62,16 +62,17 @@ function generateCausalAnalysis(
   }
 
   // v3.11: CPI consistente con Executive Summary
-  const CPI_TCO = 2.33;
+  const CPI_TCO = 2.33;  // Benchmark para cálculos de impacto cuando no hay CPI real
   // Usar CPI pre-calculado de heatmapData si existe, sino calcular desde annual_cost/cost_volume
+  // IMPORTANTE: Mismo cálculo que ExecutiveSummaryTab para consistencia
   const totalCostVolume = heatmapData.reduce((sum, h) => sum + (h.cost_volume || h.volume), 0);
   const totalAnnualCost = heatmapData.reduce((sum, h) => sum + (h.annual_cost || 0), 0);
   const hasCpiField = heatmapData.some(h => h.cpi !== undefined && h.cpi > 0);
   const CPI = hasCpiField
     ? (totalCostVolume > 0
         ? heatmapData.reduce((sum, h) => sum + (h.cpi || 0) * (h.cost_volume || h.volume), 0) / totalCostVolume
-        : CPI_TCO)
-    : (totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : CPI_TCO);
+        : 0)
+    : (totalCostVolume > 0 ? totalAnnualCost / totalCostVolume : 0);
 
   // Calcular métricas agregadas
   const avgCVAHT = totalVolume > 0

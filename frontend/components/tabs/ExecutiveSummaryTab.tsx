@@ -57,8 +57,8 @@ const BENCHMARKS_INDUSTRIA: Record<IndustryKey, IndustryBenchmarks> = {
     metricas: {
       aht: { p25: 320, p50: 380, p75: 450, p90: 520, unidad: 's', invertida: true },
       fcr: { p25: 55, p50: 68, p75: 78, p90: 85, unidad: '%', invertida: false },
-      abandono: { p25: 8, p50: 5, p75: 3, p90: 2, unidad: '%', invertida: true },
-      cpi: { p25: 4.50, p50: 3.50, p75: 2.80, p90: 2.20, unidad: '€', invertida: true }
+      abandono: { p25: 2, p50: 5, p75: 8, p90: 12, unidad: '%', invertida: true },
+      cpi: { p25: 2.20, p50: 3.50, p75: 4.50, p90: 5.50, unidad: '€', invertida: true }
     }
   },
   telecomunicaciones: {
@@ -67,8 +67,8 @@ const BENCHMARKS_INDUSTRIA: Record<IndustryKey, IndustryBenchmarks> = {
     metricas: {
       aht: { p25: 380, p50: 420, p75: 500, p90: 600, unidad: 's', invertida: true },
       fcr: { p25: 50, p50: 65, p75: 75, p90: 82, unidad: '%', invertida: false },
-      abandono: { p25: 10, p50: 6, p75: 4, p90: 2, unidad: '%', invertida: true },
-      cpi: { p25: 5.00, p50: 4.00, p75: 3.20, p90: 2.50, unidad: '€', invertida: true }
+      abandono: { p25: 2, p50: 6, p75: 10, p90: 15, unidad: '%', invertida: true },
+      cpi: { p25: 2.50, p50: 4.00, p75: 5.00, p90: 6.00, unidad: '€', invertida: true }
     }
   },
   banca: {
@@ -77,8 +77,8 @@ const BENCHMARKS_INDUSTRIA: Record<IndustryKey, IndustryBenchmarks> = {
     metricas: {
       aht: { p25: 280, p50: 340, p75: 420, p90: 500, unidad: 's', invertida: true },
       fcr: { p25: 58, p50: 72, p75: 82, p90: 88, unidad: '%', invertida: false },
-      abandono: { p25: 6, p50: 4, p75: 2, p90: 1, unidad: '%', invertida: true },
-      cpi: { p25: 6.00, p50: 4.50, p75: 3.50, p90: 2.80, unidad: '€', invertida: true }
+      abandono: { p25: 1, p50: 4, p75: 6, p90: 10, unidad: '%', invertida: true },
+      cpi: { p25: 2.80, p50: 4.50, p75: 6.00, p90: 7.50, unidad: '€', invertida: true }
     }
   },
   utilities: {
@@ -87,8 +87,8 @@ const BENCHMARKS_INDUSTRIA: Record<IndustryKey, IndustryBenchmarks> = {
     metricas: {
       aht: { p25: 350, p50: 400, p75: 480, p90: 560, unidad: 's', invertida: true },
       fcr: { p25: 52, p50: 67, p75: 77, p90: 84, unidad: '%', invertida: false },
-      abandono: { p25: 9, p50: 6, p75: 4, p90: 2, unidad: '%', invertida: true },
-      cpi: { p25: 4.20, p50: 3.30, p75: 2.60, p90: 2.00, unidad: '€', invertida: true }
+      abandono: { p25: 2, p50: 6, p75: 9, p90: 14, unidad: '%', invertida: true },
+      cpi: { p25: 2.00, p50: 3.30, p75: 4.20, p90: 5.20, unidad: '€', invertida: true }
     }
   },
   retail: {
@@ -97,8 +97,8 @@ const BENCHMARKS_INDUSTRIA: Record<IndustryKey, IndustryBenchmarks> = {
     metricas: {
       aht: { p25: 240, p50: 300, p75: 380, p90: 450, unidad: 's', invertida: true },
       fcr: { p25: 60, p50: 73, p75: 82, p90: 89, unidad: '%', invertida: false },
-      abandono: { p25: 7, p50: 4, p75: 2, p90: 1, unidad: '%', invertida: true },
-      cpi: { p25: 3.80, p50: 2.80, p75: 2.10, p90: 1.60, unidad: '€', invertida: true }
+      abandono: { p25: 1, p50: 4, p75: 7, p90: 12, unidad: '%', invertida: true },
+      cpi: { p25: 1.60, p50: 2.80, p75: 3.80, p90: 4.80, unidad: '€', invertida: true }
     }
   },
   general: {
@@ -107,8 +107,8 @@ const BENCHMARKS_INDUSTRIA: Record<IndustryKey, IndustryBenchmarks> = {
     metricas: {
       aht: { p25: 320, p50: 380, p75: 460, p90: 540, unidad: 's', invertida: true },
       fcr: { p25: 55, p50: 70, p75: 80, p90: 87, unidad: '%', invertida: false },
-      abandono: { p25: 8, p50: 5, p75: 3, p90: 2, unidad: '%', invertida: true },
-      cpi: { p25: 4.50, p50: 3.50, p75: 2.80, p90: 2.20, unidad: '€', invertida: true }
+      abandono: { p25: 2, p50: 5, p75: 8, p90: 12, unidad: '%', invertida: true },
+      cpi: { p25: 2.20, p50: 3.50, p75: 4.50, p90: 5.50, unidad: '€', invertida: true }
     }
   }
 };
